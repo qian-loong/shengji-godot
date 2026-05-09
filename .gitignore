@@ -20,6 +20,11 @@ production/session-state/*.md
 docs/IMPROVEMENTS-PROPOSAL.md
 docs/MULTI-STAGE-DOCUMENT-WORKFLOW.md
 
+# === Game Replay Logs (large JSON, do not commit) ===
+docs/game-logs/*.json
+docs/game-logs/*.txt
+!docs/game-logs/.gitkeep
+
 # === Build Output ===
 build/
 builds/
@@ -137,3 +142,4 @@ $RECYCLE.BIN/
 *.msm
 *.msp
 *.lnk
+bash.exe.stackdump
