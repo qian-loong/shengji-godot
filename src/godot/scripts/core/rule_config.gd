@@ -85,13 +85,13 @@ var upgrade_step: int = 1
 ## Upgrade thresholds: [score_min, upgrading_side, levels]
 ## Side: 0 = dealer, 1 = attack
 var upgrade_table: Array[Array] = [
-	[0,   0, 2],  # attack=0: dealer upgrades 2
-	[1,   0, 1],  # attack 1-39: dealer upgrades 1
-	[40,  0, 0],  # attack 40-79: dealer stays, no upgrade
+	[0,   0, 3],  # attack=0: dealer upgrades 3
+	[1,   0, 2],  # attack 1-39: dealer upgrades 2
+	[40,  0, 1],  # attack 40-79: dealer upgrades 1
 	[80,  1, 0],  # attack 80-119: attack dethrones, no upgrade
-	[120, 1, 1],  # attack 120-149: attack upgrades 1
-	[150, 1, 2],  # attack 150-199: attack upgrades 2
-	[200, 1, 3],  # attack 200: attack upgrades 3
+	[120, 1, 1],  # attack 120-159: attack upgrades 1
+	[160, 1, 2],  # attack 160-199: attack upgrades 2
+	[200, 1, 3],  # attack >=200: attack upgrades 3
 ]
 
 ## Ranks that cannot be skipped during upgrade

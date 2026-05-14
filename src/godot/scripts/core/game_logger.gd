@@ -58,6 +58,7 @@ func begin_round(round_num: int, rank: int, dealer: int, seed_value: int) -> voi
 		"rank_symbol": Card.rank_symbol(rank),
 		"dealer": dealer,
 		"seed": seed_value,
+		"bid_history": [],
 		"bid": null,
 		"trump_suit": -1,
 		"trump_suit_symbol": "",
@@ -82,6 +83,16 @@ func log_initial_hands(hands: Array, bottom: Array) -> void:
 		hand_strs.append(_cards_to_strs(h))
 	_current_round["debug"]["initial_hands"] = hand_strs
 	_current_round["debug"]["bottom_cards"] = _cards_to_strs(bottom)
+
+
+func log_bid_attempt(seat: int, action: String, reason: String = "", suit: int = -99) -> void:
+	var entry: Dictionary = { "seat": seat, "action": action }
+	if reason != "":
+		entry["reason"] = reason
+	if suit != -99:
+		entry["suit"] = suit
+		entry["suit_symbol"] = "公主" if suit < 0 else Card.suit_symbol(suit)
+	_current_round["bid_history"].append(entry)
 
 
 func log_bid(declaration, no_bid: bool = false) -> void:
@@ -228,6 +239,7 @@ func log_settlement(s: UpgradeSettlement.SettlementResult) -> void:
 		"new_rank": s.new_rank,
 		"new_rank_symbol": Card.rank_symbol(s.new_rank),
 		"dealer_dethroned": s.dealer_dethroned,
+		"new_dealer": s.new_dealer,
 		"game_over": s.game_over,
 	}
 

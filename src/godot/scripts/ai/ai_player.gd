@@ -168,6 +168,7 @@ static func _decide_follow(hand: Array, lead_info: Dictionary, trump_suit: int, 
 	var jat := rc.joker_always_trump
 	var lead_domain: Dictionary = lead_info["domain"]
 	var lead_count: int = lead_info["count"]
+	var lead_pattern: CardPattern.PatternResult = lead_info.get("pattern")
 
 	# Get cards in lead domain
 	var domain_cards: Array = []
@@ -182,13 +183,8 @@ static func _decide_follow(hand: Array, lead_info: Dictionary, trump_suit: int, 
 	var result: Array = []
 
 	if domain_cards.size() >= lead_count:
-		# Have enough domain cards — play from domain
-		# Sort by value, play smallest (save big cards)
-		domain_cards.sort_custom(func(a: Card, b: Card) -> bool:
-			return TrumpJudge.get_sort_value(a, trump_suit, current_rank, jat) < TrumpJudge.get_sort_value(b, trump_suit, current_rank, jat)
-		)
-		for i: int in range(lead_count):
-			result.append(domain_cards[i])
+		# Have enough domain cards — must respect structure rules
+		result = _pick_domain_follow(domain_cards, lead_count, lead_pattern, trump_suit, current_rank, rc)
 	elif not domain_cards.is_empty():
 		# Some domain cards — must play all, fill rest from other
 		result.append_array(domain_cards)
@@ -207,6 +203,69 @@ static func _decide_follow(hand: Array, lead_info: Dictionary, trump_suit: int, 
 		for i: int in range(mini(lead_count, all_sorted.size())):
 			result.append(all_sorted[i])
 
+	return result
+
+
+## Pick domain cards respecting structure rules (pair→must play pair, etc.)
+## Strategy: play smallest legal combination (save big cards).
+static func _pick_domain_follow(domain_cards: Array, lead_count: int, lead_pattern: CardPattern.PatternResult, trump_suit: int, current_rank: int, rc: RuleConfig) -> Array:
+	var jat := rc.joker_always_trump
+
+	# Group domain cards by card identity (suit+rank / joker_type) to find real pairs
+	var by_id: Dictionary = {}  # card_id -> [Card, ...]
+	for c: Card in domain_cards:
+		var card_id: String
+		if c.is_joker:
+			card_id = "joker_%d" % c.joker_type
+		else:
+			card_id = "%d_%d" % [c.suit, c.rank]
+		if not by_id.has(card_id):
+			by_id[card_id] = []
+		by_id[card_id].append(c)
+
+	# Sort groups by sort_value (smallest first for "save big cards" strategy)
+	var sorted_ids := by_id.keys()
+	sorted_ids.sort_custom(func(a: String, b: String) -> bool:
+		return TrumpJudge.get_sort_value(by_id[a][0], trump_suit, current_rank, jat) < TrumpJudge.get_sort_value(by_id[b][0], trump_suit, current_rank, jat)
+	)
+
+	var pairs: Array = []  # [[card, card], ...]
+	var singles: Array = []  # [card, ...]
+	for id: String in sorted_ids:
+		var group: Array = by_id[id]
+		while group.size() >= 2:
+			pairs.append([group[0], group[1]])
+			group = group.slice(2)
+		for c: Card in group:
+			singles.append(c)
+
+	var result: Array = []
+
+	if lead_pattern != null and rc.strict_follow_structure and lead_pattern.type == Card.CardType.PAIR:
+		if not pairs.is_empty():
+			# Must play a pair — pick smallest pair (strategy: save big)
+			result.append_array(pairs[0])
+			return result
+
+	if lead_pattern != null and rc.strict_follow_structure and lead_pattern.type == Card.CardType.TRACTOR:
+		# Must include as many pairs as possible, up to lead's pair_count
+		var needed_pairs := mini(pairs.size(), lead_pattern.pair_count)
+		for i: int in range(needed_pairs):
+			result.append_array(pairs[i])
+		# Fill remaining with singles
+		var remaining := lead_count - result.size()
+		for i: int in range(mini(remaining, singles.size())):
+			result.append(singles[i])
+		if result.size() >= lead_count:
+			return result.slice(0, lead_count)
+
+	# Default: play smallest cards
+	domain_cards.sort_custom(func(a: Card, b: Card) -> bool:
+		return TrumpJudge.get_sort_value(a, trump_suit, current_rank, jat) < TrumpJudge.get_sort_value(b, trump_suit, current_rank, jat)
+	)
+	result = []
+	for i: int in range(lead_count):
+		result.append(domain_cards[i])
 	return result
 
 

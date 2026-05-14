@@ -147,6 +147,169 @@ func test_follow_wrong_count() -> void:
 
 
 # ============================================================
+# strict_follow_structure: 有对必须出对
+# ============================================================
+
+func test_follow_pair_must_play_pair_when_available() -> void:
+	# Lead is Pair, hand has pair in same domain → must play pair, not singles
+	rc.strict_follow_structure = true
+	var lead_domain := {"type": TrumpJudge.DomainType.TRUMP, "suit": -1}
+	var trump_suit := S.DIAMOND  # ♦ is trump
+	var rank := R.TWO  # rank card = 2
+	# Hand has: ♠2♠2 (trump pair) + ♦Q + ♦K
+	var hand: Array = [
+		Card.normal(S.SPADE, R.TWO, 0), Card.normal(S.SPADE, R.TWO, 1),
+		Card.normal(S.DIAMOND, R.QUEEN, 0), Card.normal(S.DIAMOND, R.KING, 0),
+	]
+	# Lead is trump Pair (♦A♦A). Player tries to play ♦Q♦K (two singles, not a pair)
+	var play: Array = [Card.normal(S.DIAMOND, R.QUEEN, 0), Card.normal(S.DIAMOND, R.KING, 0)]
+	var lead_pattern := CardPattern.PatternResult.new(Card.CardType.PAIR, 2)
+	var valid := PlayValidator.validate_follow(play, hand, 2, lead_domain, trump_suit, rank, rc, lead_pattern)
+	assert_false(valid, "must play pair ♠2♠2 when available, not singles ♦Q♦K")
+
+
+func test_follow_pair_singles_ok_when_no_pair() -> void:
+	# Lead is Pair, hand has NO pair in domain → singles are OK
+	rc.strict_follow_structure = true
+	var lead_domain := {"type": TrumpJudge.DomainType.TRUMP, "suit": -1}
+	var trump_suit := S.DIAMOND
+	var rank := R.TWO
+	# Hand has: ♦Q + ♦K + ♥2 (3 trump singles, no trump pair)
+	var hand: Array = [
+		Card.normal(S.DIAMOND, R.QUEEN, 0), Card.normal(S.DIAMOND, R.KING, 0),
+		Card.normal(S.HEART, R.TWO, 0),
+	]
+	var play: Array = [Card.normal(S.DIAMOND, R.QUEEN, 0), Card.normal(S.DIAMOND, R.KING, 0)]
+	var lead_pattern := CardPattern.PatternResult.new(Card.CardType.PAIR, 2)
+	var valid := PlayValidator.validate_follow(play, hand, 2, lead_domain, trump_suit, rank, rc, lead_pattern)
+	assert_true(valid, "no pair in hand, playing two singles is OK")
+
+
+func test_follow_tractor_must_play_pair_when_no_tractor() -> void:
+	# Lead is Tractor(2对=4张), hand has no tractor but has 1 pair → must include pair
+	rc.strict_follow_structure = true
+	var lead_domain := {"type": TrumpJudge.DomainType.SIDE, "suit": S.HEART}
+	# Hand has: ♥5♥5 (pair) + ♥9 + ♥J (singles) — no tractor
+	var hand: Array = [
+		Card.normal(S.HEART, R.FIVE, 0), Card.normal(S.HEART, R.FIVE, 1),
+		Card.normal(S.HEART, R.NINE, 0), Card.normal(S.HEART, R.JACK, 0),
+	]
+	var lead_pattern := CardPattern.PatternResult.new(Card.CardType.TRACTOR, 4)
+	lead_pattern.pair_count = 2
+
+	# Bad play: break pair apart into 4 singles
+	var play_bad: Array = [
+		Card.normal(S.HEART, R.FIVE, 0), Card.normal(S.HEART, R.NINE, 0),
+		Card.normal(S.HEART, R.JACK, 0), Card.normal(S.HEART, R.FIVE, 1),
+	]
+	var valid_bad := PlayValidator.validate_follow(play_bad, hand, 4, lead_domain, S.SPADE, R.FOUR, rc, lead_pattern)
+	# The 4 cards include ♥5♥5 but they're not played as a pair unit — however
+	# _count_pairs sees them as a pair by sort_value. So this actually passes.
+	# The real violation is playing 0 pairs when you have 1.
+	# Let's test a clearer violation: omit the pair entirely.
+
+	# Bad play 2: skip the pair, play 4 different singles (if available)
+	# Hand only has 4 cards total with 1 pair, so any 4-card play includes both ♥5s.
+	# Need different hand to test: 2 pairs + 2 singles = 6 domain cards
+	var hand2: Array = [
+		Card.normal(S.HEART, R.FIVE, 0), Card.normal(S.HEART, R.FIVE, 1),
+		Card.normal(S.HEART, R.NINE, 0), Card.normal(S.HEART, R.NINE, 1),
+		Card.normal(S.HEART, R.JACK, 0), Card.normal(S.HEART, R.QUEEN, 0),
+	]
+	# Bad: play 4 singles, skip both pairs
+	var play_no_pairs: Array = [
+		Card.normal(S.HEART, R.FIVE, 0), Card.normal(S.HEART, R.NINE, 0),
+		Card.normal(S.HEART, R.JACK, 0), Card.normal(S.HEART, R.QUEEN, 0),
+	]
+	var valid_no_pairs := PlayValidator.validate_follow(play_no_pairs, hand2, 4, lead_domain, S.SPADE, R.FOUR, rc, lead_pattern)
+	assert_false(valid_no_pairs, "has 2 pairs but played 0 pairs — must include pairs when following tractor")
+
+	# Good: play 2 pairs (best match for tractor)
+	var play_good: Array = [
+		Card.normal(S.HEART, R.FIVE, 0), Card.normal(S.HEART, R.FIVE, 1),
+		Card.normal(S.HEART, R.NINE, 0), Card.normal(S.HEART, R.NINE, 1),
+	]
+	var valid_good := PlayValidator.validate_follow(play_good, hand2, 4, lead_domain, S.SPADE, R.FOUR, rc, lead_pattern)
+	assert_true(valid_good, "playing 2 pairs to follow tractor is valid")
+
+
+func test_follow_tractor_one_pair_plus_singles() -> void:
+	# Lead Tractor(2对=4张), hand has 1 pair + singles → must include the 1 pair
+	rc.strict_follow_structure = true
+	var lead_domain := {"type": TrumpJudge.DomainType.SIDE, "suit": S.HEART}
+	var hand: Array = [
+		Card.normal(S.HEART, R.FIVE, 0), Card.normal(S.HEART, R.FIVE, 1),
+		Card.normal(S.HEART, R.NINE, 0), Card.normal(S.HEART, R.JACK, 0),
+		Card.normal(S.HEART, R.QUEEN, 0),
+	]
+	var lead_pattern := CardPattern.PatternResult.new(Card.CardType.TRACTOR, 4)
+	lead_pattern.pair_count = 2
+
+	# Good: pair + 2 singles
+	var play_good: Array = [
+		Card.normal(S.HEART, R.FIVE, 0), Card.normal(S.HEART, R.FIVE, 1),
+		Card.normal(S.HEART, R.NINE, 0), Card.normal(S.HEART, R.JACK, 0),
+	]
+	var valid_good := PlayValidator.validate_follow(play_good, hand, 4, lead_domain, S.SPADE, R.FOUR, rc, lead_pattern)
+	assert_true(valid_good, "1 pair + 2 singles is valid when only 1 pair available")
+
+	# Bad: skip pair, play 4 singles
+	var play_bad: Array = [
+		Card.normal(S.HEART, R.NINE, 0), Card.normal(S.HEART, R.JACK, 0),
+		Card.normal(S.HEART, R.QUEEN, 0), Card.normal(S.HEART, R.FIVE, 0),
+	]
+	var valid_bad := PlayValidator.validate_follow(play_bad, hand, 4, lead_domain, S.SPADE, R.FOUR, rc, lead_pattern)
+	assert_false(valid_bad, "has 1 pair but played 0 pairs — must include pair")
+
+
+func test_follow_tractor_no_pairs_all_singles_ok() -> void:
+	# Lead Tractor(2对=4张), hand has 0 pairs → 4 singles is OK
+	rc.strict_follow_structure = true
+	var lead_domain := {"type": TrumpJudge.DomainType.SIDE, "suit": S.HEART}
+	var hand: Array = [
+		Card.normal(S.HEART, R.FIVE, 0), Card.normal(S.HEART, R.SEVEN, 0),
+		Card.normal(S.HEART, R.NINE, 0), Card.normal(S.HEART, R.JACK, 0),
+	]
+	var lead_pattern := CardPattern.PatternResult.new(Card.CardType.TRACTOR, 4)
+	lead_pattern.pair_count = 2
+
+	var play: Array = [
+		Card.normal(S.HEART, R.FIVE, 0), Card.normal(S.HEART, R.SEVEN, 0),
+		Card.normal(S.HEART, R.NINE, 0), Card.normal(S.HEART, R.JACK, 0),
+	]
+	var valid := PlayValidator.validate_follow(play, hand, 4, lead_domain, S.SPADE, R.FOUR, rc, lead_pattern)
+	assert_true(valid, "no pairs in hand, 4 singles is OK")
+
+
+func test_follow_pair_off_suit_rank_cards_not_pair() -> void:
+	# Regression: off-suit rank cards (♥2 ♦2) have same sort_value but are NOT a pair.
+	# If hand has a real pair (♣2♣2), must play that, not ♥2♦2.
+	rc.strict_follow_structure = true
+	var lead_domain := {"type": TrumpJudge.DomainType.TRUMP, "suit": -1}
+	var trump_suit := S.SPADE
+	var rank := R.TWO
+	# Hand: ♣2♣2 (real pair) + ♥2 + ♦2 (same sort_value, NOT a pair)
+	var hand: Array = [
+		Card.normal(S.CLUB, R.TWO, 0), Card.normal(S.CLUB, R.TWO, 1),
+		Card.normal(S.HEART, R.TWO, 0), Card.normal(S.DIAMOND, R.TWO, 0),
+	]
+	# Bad: play ♥2♦2 (looks like pair by sort_value but isn't)
+	var play_bad: Array = [
+		Card.normal(S.HEART, R.TWO, 0), Card.normal(S.DIAMOND, R.TWO, 0),
+	]
+	var lead_pattern := CardPattern.PatternResult.new(Card.CardType.PAIR, 2)
+	var valid_bad := PlayValidator.validate_follow(play_bad, hand, 2, lead_domain, trump_suit, rank, rc, lead_pattern)
+	assert_false(valid_bad, "♥2♦2 is NOT a pair — must play real pair ♣2♣2")
+
+	# Good: play ♣2♣2 (real pair)
+	var play_good: Array = [
+		Card.normal(S.CLUB, R.TWO, 0), Card.normal(S.CLUB, R.TWO, 1),
+	]
+	var valid_good := PlayValidator.validate_follow(play_good, hand, 2, lead_domain, trump_suit, rank, rc, lead_pattern)
+	assert_true(valid_good, "♣2♣2 is a real pair — valid")
+
+
+# ============================================================
 # S1-08: Trick winner (AC8-AC14)
 # ============================================================
 

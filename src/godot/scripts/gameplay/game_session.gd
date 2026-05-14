@@ -13,7 +13,7 @@ var is_first_game: bool = true
 var round_num: int = 0
 var game_seed: int = -1  # -1 = random
 
-const SEAT_NAMES: Array[String] = ["你(南)", "AI-西", "搭档(北)", "AI-东"]
+const SEAT_NAMES: Array[String] = ["你(南)", "AI-东", "搭档(北)", "AI-西"]
 
 
 func _init() -> void:
@@ -62,8 +62,8 @@ func _create_default_config() -> RuleConfig:
 	var rc := RuleConfig.new()
 	rc.deck_count = 2
 	rc.current_rank = Card.Rank.TWO
-	rc.bid_requires_joker = false  # Easier for testing
-	rc.trump_joker_color_match = false
+	rc.bid_requires_joker = true
+	rc.trump_joker_color_match = true
 	rc.allow_dump = false  # MVP: no dump to simplify
 	rc.strict_follow_structure = true
 	return rc
@@ -96,12 +96,9 @@ func _run_game_loop() -> void:
 				current_rank = settlement.new_rank
 
 			# Update dealer
-			if settlement.dealer_dethroned:
-				# Switch to attack team
-				if current_dealer == 0 or current_dealer == 2:
-					current_dealer = 1  # Switch to team 1,3
-				else:
-					current_dealer = 0  # Switch to team 0,2
+			if settlement.new_dealer >= 0:
+				current_dealer = settlement.new_dealer
+				print("→ 新庄家: %s" % SEAT_NAMES[current_dealer])
 
 			print("\n按 Enter 继续下一局...")
 			# In headless mode we auto-continue
@@ -175,6 +172,9 @@ func _bidding_phase() -> void:
 				if game_round.process_bid(declaration):
 					bid_made = true
 					print("  ✓ 亮主成功！")
+					logger.log_bid_attempt(seat, "bid", "", declaration.suit)
+			else:
+				logger.log_bid_attempt(seat, "skip", "no_valid_cards" if bids.is_empty() else "already_bid")
 		else:
 			# AI player
 			if not bid_made:
@@ -184,13 +184,20 @@ func _bidding_phase() -> void:
 						bid_made = true
 						var suit_str := "公主(无主)" if declaration.suit < 0 else Card.suit_symbol(declaration.suit)
 						print("%s 亮主: %s" % [SEAT_NAMES[seat], suit_str])
+						logger.log_bid_attempt(seat, "bid", "", declaration.suit)
+					else:
+						logger.log_bid_attempt(seat, "skip", "bid_rejected")
+				else:
+					logger.log_bid_attempt(seat, "skip", "ai_pass")
+			else:
+				logger.log_bid_attempt(seat, "skip", "already_bid")
 
 		if bid_made and is_first_game:
 			break  # First game: first come first served
 
 	if not bid_made:
-		game_round.set_no_bid_default(human_seat)
-		print("无人亮主，默认 %s 为庄家，公主局" % SEAT_NAMES[human_seat])
+		game_round.set_no_bid_default(current_dealer)
+		print("无人亮主，默认 %s 为庄家，公主局" % SEAT_NAMES[current_dealer])
 
 	var trump_str := "公主(无主)" if game_round.trump_suit < 0 else Card.suit_symbol(game_round.trump_suit)
 	print("\n主花色: %s | 庄家: %s" % [trump_str, SEAT_NAMES[game_round.dealer_seat]])

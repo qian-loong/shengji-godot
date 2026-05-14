@@ -38,7 +38,8 @@ static func validate_lead(cards: Array, hand: Array, trump_suit: int, current_ra
 # ============================================================
 
 ## Validate a follow play. Returns true if legal.
-static func validate_follow(cards: Array, hand: Array, lead_count: int, lead_domain: Dictionary, trump_suit: int, current_rank: int, rule_config: RuleConfig) -> bool:
+## lead_pattern: the CardPattern.PatternResult of the lead play (null = skip structure check)
+static func validate_follow(cards: Array, hand: Array, lead_count: int, lead_domain: Dictionary, trump_suit: int, current_rank: int, rule_config: RuleConfig, lead_pattern: CardPattern.PatternResult = null) -> bool:
 	# Must play exact same number of cards
 	if cards.size() != lead_count:
 		return false
@@ -52,22 +53,22 @@ static func validate_follow(cards: Array, hand: Array, lead_count: int, lead_dom
 	# Count how many cards of lead domain in hand
 	var domain_cards_in_hand := _get_domain_cards(hand, lead_domain, trump_suit, current_rank, jat)
 
-	# Count how many of the played cards are in lead domain
-	var played_domain_count := 0
+	# Get played cards that are in lead domain
+	var played_domain_cards: Array = []
 	for c: Card in cards:
 		var dom := TrumpJudge.get_suit_domain(c, trump_suit, current_rank, jat)
 		if _domains_equal(dom, lead_domain):
-			played_domain_count += 1
+			played_domain_cards.append(c)
 
 	# If hand has cards in lead domain, must play them first
 	var required_domain_count := mini(domain_cards_in_hand.size(), lead_count)
-	if played_domain_count < required_domain_count:
+	if played_domain_cards.size() < required_domain_count:
 		return false
 
-	# If strict_follow_structure, check structure matching
-	# (simplified for MVP: just check domain count is correct)
-	# Full structure matching (tractor > pair > single priority) is complex
-	# and will be enforced in UI hint, not hard-blocked for MVP
+	# strict_follow_structure: must match lead pattern structure when possible
+	if rule_config.strict_follow_structure and lead_pattern != null and played_domain_cards.size() >= lead_count:
+		if not _check_follow_structure(played_domain_cards, domain_cards_in_hand, lead_pattern, trump_suit, current_rank, rule_config):
+			return false
 
 	return true
 
@@ -201,6 +202,49 @@ static func _get_play_sort_value(cards: Array, trump_suit: int, current_rank: in
 		if v > max_val:
 			max_val = v
 	return max_val
+
+
+## Check that played domain cards respect lead pattern structure.
+## GDD rule: Pair → must play pair if hand has one; Tractor → tractor > pairs > singles.
+static func _check_follow_structure(
+	played_domain: Array, hand_domain: Array,
+	lead_pattern: CardPattern.PatternResult,
+	trump_suit: int, current_rank: int, rule_config: RuleConfig,
+) -> bool:
+	var jat := rule_config.joker_always_trump
+
+	if lead_pattern.type == Card.CardType.PAIR:
+		var hand_pair_count := _count_pairs(hand_domain, trump_suit, current_rank, jat)
+		if hand_pair_count > 0:
+			var played_pair_count := _count_pairs(played_domain, trump_suit, current_rank, jat)
+			if played_pair_count < 1:
+				return false
+
+	elif lead_pattern.type == Card.CardType.TRACTOR:
+		var hand_pair_count := _count_pairs(hand_domain, trump_suit, current_rank, jat)
+		if hand_pair_count > 0:
+			var required_pairs := mini(hand_pair_count, lead_pattern.pair_count)
+			var played_pair_count := _count_pairs(played_domain, trump_suit, current_rank, jat)
+			if played_pair_count < required_pairs:
+				return false
+
+	return true
+
+
+## Count pairs in a set of cards (group by card identity: suit+rank or joker_type).
+static func _count_pairs(cards: Array, _trump_suit: int, _current_rank: int, _jat: bool) -> int:
+	var id_counts: Dictionary = {}
+	for c: Card in cards:
+		var card_id: String
+		if c.is_joker:
+			card_id = "joker_%d" % c.joker_type
+		else:
+			card_id = "%d_%d" % [c.suit, c.rank]
+		id_counts[card_id] = id_counts.get(card_id, 0) + 1
+	var pairs := 0
+	for id: String in id_counts:
+		pairs += id_counts[id] / 2
+	return pairs
 
 
 static func _structure_matches(play_pattern: CardPattern.PatternResult, lead_pattern: CardPattern.PatternResult) -> bool:

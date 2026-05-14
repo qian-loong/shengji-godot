@@ -16,12 +16,14 @@ class SettlementResult:
 	var new_rank: int                # New rank after upgrade
 	var game_over: bool              # Whether the game ends
 	var dealer_dethroned: bool       # Whether dealer was dethroned
+	var new_dealer: int              # New dealer seat (-1 if dealer not changed)
 
 
 ## Calculate settlement
 static func calculate(
 	attack_score: int,
 	bottom_cards: Array,
+	dealer_seat: int,
 	last_trick_winner_is_attack: bool,
 	last_trick_pattern: CardPattern.PatternResult,
 	current_rank: int,
@@ -53,6 +55,12 @@ static func calculate(
 	result.upgrading_side = side
 	result.upgrade_levels = levels
 	result.dealer_dethroned = (result.final_score >= rule_config.upgrade_threshold)
+
+	# New dealer: if dethroned, next seat (counter-clockwise) becomes dealer
+	if result.dealer_dethroned:
+		result.new_dealer = (dealer_seat + 1) % 4
+	else:
+		result.new_dealer = -1  # Dealer unchanged
 
 	# Calculate new rank
 	if levels > 0:

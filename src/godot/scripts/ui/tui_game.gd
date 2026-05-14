@@ -2,8 +2,8 @@
 ## Uses Label + buttons for card selection and gameplay
 extends Control
 
-const SEAT_NAMES: Array[String] = ["你(南)", "AI-西", "搭档(北)", "AI-东"]
-# 逆时针座位顺序: 南(0) → 东(3) → 北(2) → 西(1)
+const SEAT_NAMES: Array[String] = ["你(南)", "AI-东", "搭档(北)", "AI-西"]
+# 逆时针座位顺序: 南(0/下) → 东(1/右) → 北(2/上) → 西(3/左)
 
 # ============================================================
 # UI nodes (created in _ready)
@@ -31,6 +31,7 @@ var round_num: int = 0
 var selected_indices: Array[int] = []
 var current_phase: String = "idle"  # idle, bidding, burying, leading, following, settlement
 var waiting_for_input: bool = false
+var _bid_seat_index: int = 0  # tracks position in bidding rotation
 
 # Play phase state
 var trick_play_cards: Array = []
@@ -152,8 +153,8 @@ func _start_new_game() -> void:
 	rule_config = RuleConfig.new()
 	rule_config.deck_count = 2
 	rule_config.current_rank = Card.Rank.TWO
-	rule_config.bid_requires_joker = false
-	rule_config.trump_joker_color_match = false
+	rule_config.bid_requires_joker = true
+	rule_config.trump_joker_color_match = true
 	rule_config.allow_dump = false
 	rule_config.strict_follow_structure = true
 
@@ -197,24 +198,68 @@ func _start_round() -> void:
 
 func _start_bidding() -> void:
 	current_phase = "bidding"
-	_log("\n[color=green]— 亮主阶段（先到先得）—[/color]")
 
-	# 先问人类玩家是否要亮主
-	var human_bids := TrumpBidding.get_available_bids(human_seat,
-		game_round.get_hand(human_seat), current_rank, rule_config)
-	if not human_bids.is_empty():
-		_show_bid_options(human_bids)
+	if is_first_game:
+		_log("\n[color=green]— 亮主阶段（首局·先到先得）—[/color]")
+		# MVP简化：首局一次发完牌，先问人类再轮询AI
+		var human_bids := TrumpBidding.get_available_bids(human_seat,
+			game_round.get_hand(human_seat), current_rank, rule_config)
+		if not human_bids.is_empty():
+			_show_bid_options(human_bids)
+		else:
+			_log("你没有可亮的牌")
+			logger.log_bid_attempt(human_seat, "skip", "no_valid_cards")
+			_finish_bidding_round()
 	else:
-		_log("你没有可亮的牌")
-		_ai_bidding_phase()
+		_log("\n[color=green]— 亮主阶段（从庄家开始轮询）—[/color]")
+		_bid_seat_index = 0
+		_process_next_bidder()
 
 
-## 人类选择后（或无牌可亮时），AI 依次尝试亮主
-func _ai_bidding_phase() -> void:
-	var bid_made := game_round.bid_declaration != null  # 人类可能已经亮了
+## Non-first-game: process bidders in seat order from current_dealer
+func _process_next_bidder() -> void:
+	if game_round.bid_declaration != null:
+		_finish_bidding()
+		return
+	if _bid_seat_index >= 4:
+		# All 4 players checked, no one bid
+		game_round.set_no_bid_default(current_dealer)
+		_log("无人亮主，默认 %s 为庄家，公主局" % SEAT_NAMES[current_dealer])
+		_finish_bidding()
+		return
+
+	var seat := (current_dealer + _bid_seat_index) % 4
+	var hand := game_round.get_hand(seat)
+
+	if seat == human_seat:
+		var human_bids := TrumpBidding.get_available_bids(seat, hand, current_rank, rule_config)
+		if not human_bids.is_empty():
+			_show_bid_options(human_bids)
+			return  # Wait for player input
+		else:
+			_log("你没有可亮的牌（跳过）")
+			logger.log_bid_attempt(seat, "skip", "no_valid_cards")
+	else:
+		var decl := AIPlayer.decide_bid(seat, hand, current_rank, rule_config)
+		if decl != null and game_round.process_bid(decl):
+			var s := "公主" if decl.suit < 0 else Card.suit_symbol(decl.suit)
+			_log("%s 亮主: %s" % [SEAT_NAMES[seat], s])
+			logger.log_bid_attempt(seat, "bid", "", decl.suit)
+			_finish_bidding()
+			return
+		else:
+			_log("%s 跳过" % SEAT_NAMES[seat])
+			logger.log_bid_attempt(seat, "skip", "ai_pass")
+
+	_bid_seat_index += 1
+	_process_next_bidder()
+
+
+## First-game: after human, let AI try in seat order
+func _finish_bidding_round() -> void:
+	var bid_made := game_round.bid_declaration != null
 
 	if not bid_made:
-		# AI 按座位顺序尝试
 		for i: int in range(4):
 			var seat := (current_dealer + i) % 4
 			if seat == human_seat:
@@ -225,12 +270,19 @@ func _ai_bidding_phase() -> void:
 				bid_made = true
 				var s := "公主" if decl.suit < 0 else Card.suit_symbol(decl.suit)
 				_log("%s 亮主: %s" % [SEAT_NAMES[seat], s])
-				break  # 首局先到先得
+				logger.log_bid_attempt(seat, "bid", "", decl.suit)
+				break
+			else:
+				logger.log_bid_attempt(seat, "skip", "ai_pass")
 
 	if not bid_made:
-		game_round.set_no_bid_default(human_seat)
-		_log("无人亮主，默认你为庄家，公主局")
+		game_round.set_no_bid_default(current_dealer)
+		_log("无人亮主，默认 %s 为庄家，公主局" % SEAT_NAMES[current_dealer])
 
+	_finish_bidding()
+
+
+func _finish_bidding() -> void:
 	_log("主花色: %s | 庄家: %s" % [_trump_str(), SEAT_NAMES[game_round.dealer_seat]])
 	_update_info()
 	_start_bury()
@@ -261,8 +313,12 @@ func _on_bid_selected(bids: Array, index: int) -> void:
 	game_round.process_bid(decl)
 	var s := "公主" if decl.suit < 0 else Card.suit_symbol(decl.suit)
 	_log("你亮主: %s" % s)
+	logger.log_bid_attempt(human_seat, "bid", "", decl.suit)
 	_clear_actions()
-	_ai_bidding_phase()  # AI 不再能覆盖（首局先到先得）
+	if is_first_game:
+		_finish_bidding_round()  # First game: no more bids after first one
+	else:
+		_finish_bidding()  # Non-first: player bid accepted, done
 
 
 func _on_bid_skip() -> void:
@@ -270,8 +326,13 @@ func _on_bid_skip() -> void:
 		return
 	waiting_for_input = false
 	_log("你选择不亮")
+	logger.log_bid_attempt(human_seat, "skip", "player_choice")
 	_clear_actions()
-	_ai_bidding_phase()  # 让 AI 尝试
+	if is_first_game:
+		_finish_bidding_round()  # Let AI try
+	else:
+		_bid_seat_index += 1
+		_process_next_bidder()  # Continue rotation
 
 
 # ============================================================
@@ -592,11 +653,8 @@ func _finish_round() -> void:
 	else:
 		if settlement.upgrade_levels > 0:
 			current_rank = settlement.new_rank
-		if settlement.dealer_dethroned:
-			if current_dealer == 0 or current_dealer == 2:
-				current_dealer = 1
-			else:
-				current_dealer = 0
+		if settlement.new_dealer >= 0:
+			current_dealer = settlement.new_dealer
 
 		_clear_actions()
 		var next_btn := _make_button("下一局", func() -> void: _start_round())
@@ -662,7 +720,8 @@ func _make_card_button(card: Card, index: int, callback: Callable) -> Button:
 	btn.set_meta("base_font_color", col)
 	btn.add_theme_color_override("font_color", col)
 
-	btn.pressed.connect(callback)
+	if callback.is_valid():
+		btn.pressed.connect(callback)
 	return btn
 
 
@@ -714,7 +773,7 @@ func _update_table() -> void:
 	lines.append("         %s" % table_cards.get(2, ""))
 	lines.append("")
 	lines.append("  %s                %s" % [
-		table_cards.get(1, ""), table_cards.get(3, "")])
+		table_cards.get(3, ""), table_cards.get(1, "")])
 	lines.append("")
 	lines.append("         %s" % table_cards.get(0, ""))
 	table_label.text = "\n".join(lines)
