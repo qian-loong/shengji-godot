@@ -24,6 +24,7 @@ docs/MULTI-STAGE-DOCUMENT-WORKFLOW.md
 docs/game-logs/*.json
 docs/game-logs/*.txt
 !docs/game-logs/.gitkeep
+!docs/game-logs/standard_log.json
 
 # === Build Output ===
 build/

@@ -146,7 +146,7 @@ func play_trick(play_cards: Array) -> Dictionary:
 		logger.log_hands_before_trick(hands, trump_suit, current_rank, jat)
 
 	for i: int in range(4):
-		var seat := (current_lead_seat - i + 4) % 4  # 逆时针
+		var seat := (current_lead_seat + i) % 4  # 逆时针: 0南→1东→2北→3西
 		var cards: Array = play_cards[i]
 
 		# Log each play
@@ -192,6 +192,7 @@ func play_trick(play_cards: Array) -> Dictionary:
 	}
 
 	if logger:
+		logger.log_hands_after_trick(hands, trump_suit, current_rank, jat)
 		var side_str := "attack" if winner_is_attack else "dealer"
 		logger.log_trick_result(winner, trick_score, score_tracker.get_attack_score(),
 			"winner=%d (%s), lead_domain=%s" % [winner, side_str, str(lead_domain)])
@@ -224,15 +225,17 @@ func _remove_card_from_hand(seat: int, card: Card) -> void:
 # Phase 5: Settlement
 # ============================================================
 
-func calculate_settlement() -> UpgradeSettlement.SettlementResult:
+func calculate_settlement(attack_rank: int = -1) -> UpgradeSettlement.SettlementResult:
 	var last_winner_is_attack := last_trick_winner in attack_team
 	var s := UpgradeSettlement.calculate(
 		score_tracker.get_attack_score(),
 		buried_bottom,
+		dealer_seat,
 		last_winner_is_attack,
 		last_trick_pattern,
 		current_rank,
 		rule_config,
+		attack_rank,
 	)
 	if logger:
 		logger.log_settlement(s)
@@ -253,8 +256,8 @@ func get_hand_size(seat: int) -> int:
 	return hands[seat].size()
 
 func get_seat_order_from_lead() -> Array[int]:
-	# 逆时针：南(0)→东(3)→北(2)→西(1)
+	# 逆时针: 0南→1东→2北→3西
 	var order: Array[int] = []
 	for i: int in range(4):
-		order.append((current_lead_seat - i + 4) % 4)
+		order.append((current_lead_seat + i) % 4)
 	return order

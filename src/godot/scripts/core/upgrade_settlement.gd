@@ -16,16 +16,21 @@ class SettlementResult:
 	var new_rank: int                # New rank after upgrade
 	var game_over: bool              # Whether the game ends
 	var dealer_dethroned: bool       # Whether dealer was dethroned
+	var new_dealer: int              # New dealer seat (-1 if dealer not changed)
 
 
 ## Calculate settlement
+## current_rank: the rank being played this round (dealer's team rank)
+## attack_rank: the attack team's own rank (for independent rank upgrade; -1 = same as current_rank)
 static func calculate(
 	attack_score: int,
 	bottom_cards: Array,
+	dealer_seat: int,
 	last_trick_winner_is_attack: bool,
 	last_trick_pattern: CardPattern.PatternResult,
 	current_rank: int,
 	rule_config: RuleConfig,
+	attack_rank: int = -1,
 ) -> SettlementResult:
 	var result := SettlementResult.new()
 	result.attack_base_score = attack_score
@@ -54,14 +59,34 @@ static func calculate(
 	result.upgrade_levels = levels
 	result.dealer_dethroned = (result.final_score >= rule_config.upgrade_threshold)
 
-	# Calculate new rank
+	# New dealer: if dethroned, next seat (counter-clockwise) becomes dealer
+	if result.dealer_dethroned:
+		result.new_dealer = (dealer_seat + 1) % 4
+	else:
+		result.new_dealer = -1  # Dealer unchanged
+
+	# Calculate new rank (use upgrading side's own rank as base)
 	if levels > 0:
-		result.new_rank = apply_upgrade(current_rank, levels, rule_config)
+		var base_rank: int
+		if side == 0:
+			base_rank = current_rank  # Dealer's team rank
+		elif attack_rank >= 0:
+			base_rank = attack_rank  # Attack team's own rank
+		else:
+			base_rank = current_rank  # Fallback: shared rank mode
+		result.new_rank = apply_upgrade(base_rank, levels, rule_config)
 	else:
 		result.new_rank = current_rank
 
 	# Game over check: if upgrading past A
-	result.game_over = (current_rank == Card.Rank.ACE and levels > 0)
+	var rank_for_game_over: int
+	if side == 0:
+		rank_for_game_over = current_rank
+	elif attack_rank >= 0:
+		rank_for_game_over = attack_rank
+	else:
+		rank_for_game_over = current_rank
+	result.game_over = (rank_for_game_over == Card.Rank.ACE and levels > 0)
 
 	return result
 

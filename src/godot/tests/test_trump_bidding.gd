@@ -140,3 +140,32 @@ func test_color_match_red_joker_black_suit_rejected() -> void:
 		if b.bid_type == BT.JOKER_RANK and b.suit == S.SPADE:
 			has_spade = true
 	assert_false(has_spade, "red joker + ♠ rank = rejected (color mismatch)")
+
+
+# ============================================================
+# Bidding: skip / no-bid scenarios
+# ============================================================
+
+func test_no_available_bids_no_rank_no_joker() -> void:
+	# Hand has zero rank cards and zero jokers → cannot bid at all
+	rc.bid_requires_joker = false
+	var hand: Array = [
+		Card.normal(S.SPADE, R.ACE),
+		Card.normal(S.HEART, R.KING),
+		Card.normal(S.DIAMOND, R.SEVEN),
+	]
+	var bids := TrumpBidding.get_available_bids(0, hand, R.FOUR, rc)
+	assert_eq(bids.size(), 0, "no rank cards = no bids available")
+
+
+func test_no_bid_default_keeps_dealer_as_princess() -> void:
+	# All 4 players skip → set_no_bid_default → dealer stays, 公主局
+	var gr := GameRound.new()
+	gr.setup(rc, 2)  # dealer = seat 2
+	gr.deal(12345)
+	# Nobody bids → fallback
+	gr.set_no_bid_default(2)
+	assert_eq(gr.dealer_seat, 2, "dealer stays at seat 2")
+	assert_eq(gr.trump_suit, -1, "公主局 = no trump")
+	assert_eq(gr.dealer_team, [2, 0] as Array[int], "dealer team = [2,0]")
+	assert_eq(gr.current_lead_seat, 2, "first lead = dealer")

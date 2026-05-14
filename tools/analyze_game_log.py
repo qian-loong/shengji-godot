@@ -373,7 +373,7 @@ class LogAnalyzer:
 
 
     def _check_play_order(self):
-        """检查出牌顺序（顺时针：0→3→2→1）"""
+        """检查出牌顺序（逆时针：0→1→2→3 = 南→东→北→西）"""
         print("检查出牌顺序...")
         rounds = self.log.get('rounds', [])
 
@@ -386,12 +386,12 @@ class LogAnalyzer:
                     continue
 
                 lead_seat = plays[0]['seat']
-                # 顺时针顺序：0→3→2→1→0
+                # 逆时针顺序：0→1→2→3→0 = 南→东→北→西
                 expected_order = []
                 current = lead_seat
                 for _ in range(4):
                     expected_order.append(current)
-                    current = (current - 1) % 4  # 顺时针递减
+                    current = (current + 1) % 4  # 逆时针递增
 
                 actual_order = [p['seat'] for p in plays]
 
