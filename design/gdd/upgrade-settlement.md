@@ -79,9 +79,23 @@ return rank
 
 攻方最终得分 ≥ 80（`upgrade_threshold`）→ 下庄。下一局庄家切换到当前庄家的逆时针下家（`(dealer_seat + 1) % 4`），该座位必定属于攻方。
 
-#### 5. 游戏结束条件
+#### 5. 两队独立级
 
-当一方需要打 A 级时（current_rank = A），该局为"打 A"局。打完 A 级后（即该方在 A 级胜出并需要继续升级时），该方获胜，游戏结束。
+两支队伍各自维护独立的级（rank）：
+
+```
+team_ranks[0] = 队伍 [0,2]（南+北）的当前级
+team_ranks[1] = 队伍 [1,3]（东+西）的当前级
+team_index = seat % 2
+```
+
+- 每局打的级 = 庄家方的级（`team_ranks[current_dealer % 2]`）
+- 结算后只更新**升级方**的级：`team_ranks[upgrading_team] = new_rank`
+- 攻方下庄但不升级时（80-119），两队级都不变
+
+#### 6. 游戏结束条件
+
+当一方需要打 A 级时（该队 rank = A），该局为"打 A"局。打完 A 级后（即该方在 A 级胜出并需要继续升级时），该方获胜，游戏结束。
 
 ### States and Transitions
 

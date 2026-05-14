@@ -192,6 +192,7 @@ func play_trick(play_cards: Array) -> Dictionary:
 	}
 
 	if logger:
+		logger.log_hands_after_trick(hands, trump_suit, current_rank, jat)
 		var side_str := "attack" if winner_is_attack else "dealer"
 		logger.log_trick_result(winner, trick_score, score_tracker.get_attack_score(),
 			"winner=%d (%s), lead_domain=%s" % [winner, side_str, str(lead_domain)])
@@ -224,7 +225,7 @@ func _remove_card_from_hand(seat: int, card: Card) -> void:
 # Phase 5: Settlement
 # ============================================================
 
-func calculate_settlement() -> UpgradeSettlement.SettlementResult:
+func calculate_settlement(attack_rank: int = -1) -> UpgradeSettlement.SettlementResult:
 	var last_winner_is_attack := last_trick_winner in attack_team
 	var s := UpgradeSettlement.calculate(
 		score_tracker.get_attack_score(),
@@ -234,6 +235,7 @@ func calculate_settlement() -> UpgradeSettlement.SettlementResult:
 		last_trick_pattern,
 		current_rank,
 		rule_config,
+		attack_rank,
 	)
 	if logger:
 		logger.log_settlement(s)

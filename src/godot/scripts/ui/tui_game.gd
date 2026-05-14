@@ -24,7 +24,8 @@ var logger: GameLogger
 
 var human_seat: int = 0
 var current_dealer: int = 0
-var current_rank: int = Card.Rank.TWO
+var team_ranks: Array[int] = [Card.Rank.TWO, Card.Rank.TWO]  # [team_02, team_13]
+var current_rank: int = Card.Rank.TWO  # current round's rank (derived from dealer's team)
 var is_first_game: bool = true
 var round_num: int = 0
 
@@ -160,9 +161,9 @@ func _start_new_game() -> void:
 
 	logger = GameLogger.new(true)
 	logger.set_rule_config(rule_config)
-	_auto_save_log()  # 立即保存初始日志文件
+	_auto_save_log()
 
-	current_rank = Card.Rank.TWO
+	team_ranks = [Card.Rank.TWO, Card.Rank.TWO]
 	current_dealer = 0
 	round_num = 0
 	is_first_game = true
@@ -173,19 +174,23 @@ func _start_new_game() -> void:
 
 func _start_round() -> void:
 	round_num += 1
+	current_rank = team_ranks[current_dealer % 2]
 	rule_config.current_rank = current_rank
 	var round_seed := randi()
 
 	game_round = GameRound.new()
 	game_round.setup(rule_config, current_dealer)
 	game_round.logger = logger
-	logger.begin_round(round_num, current_rank, current_dealer, round_seed)
+	logger.begin_round(round_num, current_rank, current_dealer, round_seed, team_ranks)
 
 	game_round.deal(round_seed)
 
 	var trump_str := Card.rank_symbol(current_rank)
-	_log("\n[color=cyan]══ 第 %d 局 | 级: %s | 庄家: %s ══[/color]" % [
-		round_num, trump_str, SEAT_NAMES[current_dealer]])
+	var dealer_team_name: String = ["南北队", "东西队"][current_dealer % 2] as String
+	_log("\n[color=cyan]══ 第 %d 局 | %s 打 %s 级 | 庄家: %s ══[/color]" % [
+		round_num, dealer_team_name, trump_str, SEAT_NAMES[current_dealer]])
+	_log("  南北队: %s 级 | 东西队: %s 级" % [
+		Card.rank_symbol(team_ranks[0]), Card.rank_symbol(team_ranks[1])])
 	_log("发牌完成")
 
 	_update_info()
@@ -230,9 +235,10 @@ func _process_next_bidder() -> void:
 
 	var seat := (current_dealer + _bid_seat_index) % 4
 	var hand := game_round.get_hand(seat)
+	var bid_rank := _get_team_rank_for_seat(seat)
 
 	if seat == human_seat:
-		var human_bids := TrumpBidding.get_available_bids(seat, hand, current_rank, rule_config)
+		var human_bids := TrumpBidding.get_available_bids(seat, hand, bid_rank, rule_config)
 		if not human_bids.is_empty():
 			_show_bid_options(human_bids)
 			return  # Wait for player input
@@ -240,7 +246,8 @@ func _process_next_bidder() -> void:
 			_log("你没有可亮的牌（跳过）")
 			logger.log_bid_attempt(seat, "skip", "no_valid_cards")
 	else:
-		var decl := AIPlayer.decide_bid(seat, hand, current_rank, rule_config)
+		var available_bids := TrumpBidding.get_available_bids(seat, hand, bid_rank, rule_config)
+		var decl := AIPlayer.decide_bid(seat, hand, bid_rank, rule_config)
 		if decl != null and game_round.process_bid(decl):
 			var s := "公主" if decl.suit < 0 else Card.suit_symbol(decl.suit)
 			_log("%s 亮主: %s" % [SEAT_NAMES[seat], s])
@@ -249,7 +256,8 @@ func _process_next_bidder() -> void:
 			return
 		else:
 			_log("%s 跳过" % SEAT_NAMES[seat])
-			logger.log_bid_attempt(seat, "skip", "ai_pass")
+			var reason := "no_valid_cards" if available_bids.is_empty() else "ai_pass"
+			logger.log_bid_attempt(seat, "skip", reason)
 
 	_bid_seat_index += 1
 	_process_next_bidder()
@@ -265,7 +273,9 @@ func _finish_bidding_round() -> void:
 			if seat == human_seat:
 				continue
 			var hand := game_round.get_hand(seat)
-			var decl := AIPlayer.decide_bid(seat, hand, current_rank, rule_config)
+			var bid_rank := _get_team_rank_for_seat(seat)
+			var available_bids := TrumpBidding.get_available_bids(seat, hand, bid_rank, rule_config)
+			var decl := AIPlayer.decide_bid(seat, hand, bid_rank, rule_config)
 			if decl != null and game_round.process_bid(decl):
 				bid_made = true
 				var s := "公主" if decl.suit < 0 else Card.suit_symbol(decl.suit)
@@ -273,7 +283,8 @@ func _finish_bidding_round() -> void:
 				logger.log_bid_attempt(seat, "bid", "", decl.suit)
 				break
 			else:
-				logger.log_bid_attempt(seat, "skip", "ai_pass")
+				var reason := "no_valid_cards" if available_bids.is_empty() else "ai_pass"
+				logger.log_bid_attempt(seat, "skip", reason)
 
 	if not bid_made:
 		game_round.set_no_bid_default(current_dealer)
@@ -283,6 +294,7 @@ func _finish_bidding_round() -> void:
 
 
 func _finish_bidding() -> void:
+	_sync_rank_to_actual_dealer()
 	_log("主花色: %s | 庄家: %s" % [_trump_str(), SEAT_NAMES[game_round.dealer_seat]])
 	_update_info()
 	_start_bury()
@@ -625,7 +637,8 @@ func _resolve_trick() -> void:
 
 
 func _finish_round() -> void:
-	var settlement := game_round.calculate_settlement()
+	var attack_rank := team_ranks[_get_attack_team(game_round.dealer_seat)]
+	var settlement := game_round.calculate_settlement(attack_rank)
 	logger.end_round()
 
 	_log("\n[color=yellow]═══════ 结算 ═══════[/color]")
@@ -636,31 +649,67 @@ func _finish_round() -> void:
 		_log("庄家方赢最后一墩，底牌不计分")
 	_log("最终得分: %d" % settlement.final_score)
 
-	var side := "攻方" if settlement.upgrading_side == 1 else "庄家方"
+	var upgrading_team := _get_upgrading_team(settlement)
+	var team_names: Array[String] = ["南北队", "东西队"]
+	var team_name: String = team_names[upgrading_team]
+
 	if settlement.upgrade_levels > 0:
-		_log("%s 升 %d 级 → 新级: %s" % [side, settlement.upgrade_levels, Card.rank_symbol(settlement.new_rank)])
+		_log("%s 升 %d 级 → 新级: %s" % [team_name, settlement.upgrade_levels, Card.rank_symbol(settlement.new_rank)])
 	elif settlement.dealer_dethroned:
-		_log("攻方下庄")
+		_log("攻方下庄（不升级）")
 	else:
 		_log("庄家方守住")
 
+	# Update team rank
+	if settlement.upgrade_levels > 0:
+		team_ranks[upgrading_team] = settlement.new_rank
+
+	_auto_save_log()
+	is_first_game = false
+
 	if settlement.game_over:
-		_log("\n[color=yellow]🏆 游戏结束！%s 获胜！[/color]" % side)
+		_log("\n[color=yellow]🏆 游戏结束！%s 获胜！[/color]" % team_name)
 		_save_log()
 		_clear_actions()
 		var restart_btn := _make_button("再来一局", func() -> void: _start_new_game())
 		action_container.add_child(restart_btn)
 	else:
-		if settlement.upgrade_levels > 0:
-			current_rank = settlement.new_rank
 		if settlement.new_dealer >= 0:
 			current_dealer = settlement.new_dealer
+		else:
+			current_dealer = game_round.dealer_seat
+
+		_log("  南北队: %s 级 | 东西队: %s 级" % [
+			Card.rank_symbol(team_ranks[0]), Card.rank_symbol(team_ranks[1])])
 
 		_clear_actions()
 		var next_btn := _make_button("下一局", func() -> void: _start_round())
 		action_container.add_child(next_btn)
 		var save_btn := _make_button("保存日志", func() -> void: _save_log())
 		action_container.add_child(save_btn)
+
+
+func _get_upgrading_team(settlement: UpgradeSettlement.SettlementResult) -> int:
+	if settlement.upgrading_side == 0:
+		return game_round.dealer_seat % 2  # Dealer's team
+	else:
+		return _get_attack_team(game_round.dealer_seat)
+
+
+static func _get_attack_team(dealer: int) -> int:
+	return (dealer + 1) % 2
+
+
+func _get_team_rank_for_seat(seat: int) -> int:
+	return team_ranks[seat % 2]
+
+
+func _sync_rank_to_actual_dealer() -> void:
+	current_rank = _get_team_rank_for_seat(game_round.dealer_seat)
+	rule_config.current_rank = current_rank
+	game_round.current_rank = current_rank
+	if logger:
+		logger.update_round_rank(current_rank, team_ranks)
 
 
 # ============================================================
@@ -764,7 +813,7 @@ func _update_info() -> void:
 	if game_round and game_round.score_tracker:
 		score = game_round.score_tracker.get_attack_score()
 	var dealer_name := SEAT_NAMES[game_round.dealer_seat] if game_round else "—"
-	info_label.text = "[b]级: %s  |  主: %s  |  庄家: %s  |  攻方得分: %d[/b]" % [
+	info_label.text = "[b]级: %s  |  主: %s  |  庄家: %s  |  攻方: %d[/b]" % [
 		Card.rank_symbol(current_rank), trump, dealer_name, score]
 
 
@@ -808,45 +857,47 @@ func _sort_hand(hand: Array) -> Array:
 		ts = game_round.trump_suit
 		jat = rule_config.joker_always_trump
 	sorted.sort_custom(func(a: Card, b: Card) -> bool:
-		return TrumpJudge.get_sort_value(a, ts, cr, jat) > TrumpJudge.get_sort_value(b, ts, cr, jat)
+		return _card_display_less(a, b, ts, cr, jat)
 	)
 	return sorted
 
 
 func _sort_hand_for_display(hand: Array) -> Array:
-	var sorted_logic := _sort_hand(hand)
-	var ts := -1
-	var cr := current_rank
-	var jat := true
-	if game_round:
-		ts = game_round.trump_suit
-		jat = rule_config.joker_always_trump
+	return _sort_hand(hand)
 
-	var trumps: Array = []
-	var clubs: Array = []
-	var hearts: Array = []
-	var spades: Array = []
-	var diamonds: Array = []
 
-	for card: Card in sorted_logic:
-		if TrumpJudge.is_trump(card, ts, cr, jat):
-			trumps.append(card)
-		elif card.suit == Card.Suit.CLUB:
-			clubs.append(card)
-		elif card.suit == Card.Suit.HEART:
-			hearts.append(card)
-		elif card.suit == Card.Suit.SPADE:
-			spades.append(card)
-		elif card.suit == Card.Suit.DIAMOND:
-			diamonds.append(card)
+func _card_display_less(a: Card, b: Card, trump_suit: int, c_rank: int, jat: bool) -> bool:
+	var group_a := _card_display_group(a, trump_suit, c_rank, jat)
+	var group_b := _card_display_group(b, trump_suit, c_rank, jat)
+	if group_a != group_b:
+		return group_a < group_b
+	var value_a := TrumpJudge.get_sort_value(a, trump_suit, c_rank, jat)
+	var value_b := TrumpJudge.get_sort_value(b, trump_suit, c_rank, jat)
+	if value_a != value_b:
+		return value_a > value_b
+	return _card_identity_key(a) < _card_identity_key(b)
 
-	var result: Array = []
-	result.append_array(trumps)
 
-	var groups: Array = [clubs, hearts, spades, diamonds]
-	for g: Array in groups:
-		result.append_array(g)
-	return result
+func _card_display_group(card: Card, trump_suit: int, c_rank: int, jat: bool) -> int:
+	if TrumpJudge.is_trump(card, trump_suit, c_rank, jat):
+		return 0
+	match card.suit:
+		Card.Suit.CLUB:
+			return 1
+		Card.Suit.HEART:
+			return 2
+		Card.Suit.SPADE:
+			return 3
+		Card.Suit.DIAMOND:
+			return 4
+		_:
+			return 5
+
+
+func _card_identity_key(card: Card) -> String:
+	if card.is_joker:
+		return "joker_%d" % card.joker_type
+	return "%d_%02d" % [card.suit, card.rank]
 
 
 func _make_game_state() -> Dictionary:
