@@ -12,6 +12,12 @@ var current_phase: String = "idle"
 var last_settlement: UpgradeSettlement.SettlementResult = null
 var bid_seat_index: int = 0
 var bidding_resolved: bool = false
+var trick_num: int = 0
+var trick_play_cards: Array = []
+var trick_seat_index: int = 0
+var trick_seat_order: Array[int] = []
+var trick_lead_info: Dictionary = {}
+var last_trick_result: Dictionary = {}
 
 
 func _init(
@@ -173,11 +179,139 @@ func submit_bury(indices: Array[int]) -> Dictionary:
 	if not result.get("ok", false):
 		return _error(str(result.get("error", "bury_failed")))
 	current_phase = "playing"
+	trick_num = 0
+	_reset_trick_state()
 	return _ok({
 		"phase": current_phase,
 		"dealer": game_round.dealer_seat,
 		"buried": result.get("buried", []),
 	})
+
+
+func begin_trick() -> Dictionary:
+	if game_round == null:
+		return _error("missing_game_round")
+	if current_phase != "playing":
+		return _error("not_playing")
+	if game_round.get_hand_size(0) <= 0:
+		return _ok({ "phase": "settlement", "round_complete": true })
+
+	trick_num += 1
+	trick_play_cards = []
+	trick_seat_index = 0
+	trick_seat_order = game_round.get_seat_order_from_lead()
+	trick_lead_info = {}
+	last_trick_result = {}
+	return _ok({
+		"phase": current_phase,
+		"trick_num": trick_num,
+		"lead_seat": game_round.current_lead_seat,
+		"seat_order": trick_seat_order.duplicate(),
+		"attack_score": game_round.score_tracker.get_attack_score(),
+	})
+
+
+func get_current_turn_context() -> Dictionary:
+	if game_round == null:
+		return _error("missing_game_round")
+	if current_phase != "playing":
+		return _error("not_playing")
+	if trick_seat_order.is_empty():
+		var started := begin_trick()
+		if not started["ok"]:
+			return started
+	if trick_seat_index >= trick_seat_order.size():
+		return _ok({ "phase": current_phase, "trick_ready": true })
+	var seat: int = trick_seat_order[trick_seat_index]
+	return _ok({
+		"phase": current_phase,
+		"seat": seat,
+		"hand": game_round.get_hand(seat),
+		"is_leading": trick_lead_info.is_empty(),
+		"lead_info": trick_lead_info.duplicate(),
+		"lead_count": 0 if trick_play_cards.is_empty() else trick_play_cards[0].size(),
+		"game_state": make_game_state(),
+		"trick_num": trick_num,
+	})
+
+
+func submit_play(seat: int, cards: Array) -> Dictionary:
+	if game_round == null:
+		return _error("missing_game_round")
+	if current_phase != "playing":
+		return _error("not_playing")
+	if trick_seat_order.is_empty():
+		var started := begin_trick()
+		if not started["ok"]:
+			return started
+	if trick_seat_index >= trick_seat_order.size():
+		return _error("trick_already_ready")
+
+	var expected_seat: int = trick_seat_order[trick_seat_index]
+	if seat != expected_seat:
+		return _error("wrong_turn")
+	if cards.is_empty():
+		return _error("empty_play")
+
+	var hand := game_round.get_hand(seat)
+	var is_leading := trick_lead_info.is_empty()
+	if is_leading:
+		var pattern := PlayValidator.validate_lead(
+			cards,
+			hand,
+			game_round.trump_suit,
+			state.current_rank,
+			rule_config
+		)
+		if pattern == null:
+			return _error("invalid_lead")
+		trick_lead_info = _make_lead_info(cards, pattern)
+	else:
+		var lead_count: int = trick_play_cards[0].size()
+		if cards.size() != lead_count:
+			return _error("wrong_card_count")
+		var valid := PlayValidator.validate_follow(
+			cards,
+			hand,
+			lead_count,
+			trick_lead_info["domain"],
+			game_round.trump_suit,
+			state.current_rank,
+			rule_config,
+			trick_lead_info.get("pattern")
+		)
+		if not valid:
+			return _error("invalid_follow")
+
+	trick_play_cards.append(cards)
+	trick_seat_index += 1
+
+	if trick_seat_index >= trick_seat_order.size():
+		last_trick_result = game_round.play_trick(trick_play_cards)
+		_reset_trick_state()
+		return _ok({
+			"phase": current_phase,
+			"trick_complete": true,
+			"result": last_trick_result,
+		})
+
+	return _ok({
+		"phase": current_phase,
+		"trick_complete": false,
+		"next_seat": trick_seat_order[trick_seat_index],
+		"lead_info": trick_lead_info.duplicate(),
+	})
+
+
+func make_game_state() -> Dictionary:
+	if game_round == null:
+		return {}
+	return {
+		"trump_suit": game_round.trump_suit,
+		"current_rank": state.current_rank,
+		"dealer_seat": game_round.dealer_seat,
+		"attack_score": game_round.score_tracker.get_attack_score(),
+	}
 
 
 func sync_rank_to_actual_dealer() -> int:
@@ -189,6 +323,26 @@ func sync_rank_to_actual_dealer() -> int:
 	if logger:
 		logger.update_round_rank(rank, state.team_ranks)
 	return rank
+
+
+func _make_lead_info(cards: Array, pattern: CardPattern.PatternResult) -> Dictionary:
+	return {
+		"domain": TrumpJudge.get_suit_domain(
+			cards[0],
+			game_round.trump_suit,
+			state.current_rank,
+			rule_config.joker_always_trump
+		),
+		"count": cards.size(),
+		"pattern": pattern,
+	}
+
+
+func _reset_trick_state() -> void:
+	trick_play_cards = []
+	trick_seat_index = 0
+	trick_seat_order = []
+	trick_lead_info = {}
 
 
 func _log_bid_skip(seat: int, reason: String) -> void:

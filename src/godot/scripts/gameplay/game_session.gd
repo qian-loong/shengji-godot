@@ -282,21 +282,18 @@ func _bury_phase() -> void:
 
 func _play_phase() -> void:
 	print("--- 出牌阶段 ---")
-	var trick_num := 0
 	while game_round.get_hand_size(0) > 0:
-		trick_num += 1
+		var trick_context := session_controller.begin_trick()
+		var trick_num: int = trick_context["trick_num"]
 		print("\n--- 第 %d 墩 | 先手: %s | 攻方得分: %d ---" % [
 			trick_num, SEAT_NAMES[game_round.current_lead_seat],
 			game_round.score_tracker.get_attack_score()])
 
-		var play_cards: Array = []
-		var lead_info: Dictionary = {}
-		var seat_order := game_round.get_seat_order_from_lead()
-		var jat := rule_config.joker_always_trump
-
 		for i: int in range(4):
-			var seat: int = seat_order[i]
-			var hand := game_round.get_hand(seat)
+			var turn := session_controller.get_current_turn_context()
+			var seat: int = turn["seat"]
+			var hand: Array = turn["hand"]
+			var lead_info: Dictionary = turn["lead_info"]
 
 			if seat == human_seat:
 				# Human play
@@ -306,43 +303,26 @@ func _play_phase() -> void:
 					_display_hand(hand, game_round.trump_suit, current_rank)
 					# Auto-play: use AI
 					var cards := AIPlayer.decide_play(seat, hand, lead_info,
-						_make_game_state(), rule_config)
+						session_controller.make_game_state(), rule_config)
 					print("→ 自动出牌: %s" % _cards_to_str(cards))
-					play_cards.append(cards)
-					# Set lead info
-					var pattern := CardPattern.identify(cards, current_rank,
-						rule_config.tractor_allow_rank_card, rule_config.four_same_is_tractor)
-					lead_info = {
-						"domain": TrumpJudge.get_suit_domain(cards[0], game_round.trump_suit, current_rank, jat),
-						"count": cards.size(),
-						"pattern": pattern,
-					}
+					session_controller.submit_play(seat, cards)
 				else:
 					print("\n你的手牌:")
 					_display_hand(hand, game_round.trump_suit, current_rank)
 					var cards := AIPlayer.decide_play(seat, hand, lead_info,
-						_make_game_state(), rule_config)
+						session_controller.make_game_state(), rule_config)
 					print("→ 自动出牌: %s" % _cards_to_str(cards))
-					play_cards.append(cards)
+					session_controller.submit_play(seat, cards)
 			else:
 				# AI play
 				var cards := AIPlayer.decide_play(seat, hand, lead_info,
-					_make_game_state(), rule_config)
-				play_cards.append(cards)
-
-				if lead_info.is_empty():
-					var pattern := CardPattern.identify(cards, current_rank,
-						rule_config.tractor_allow_rank_card, rule_config.four_same_is_tractor)
-					lead_info = {
-						"domain": TrumpJudge.get_suit_domain(cards[0], game_round.trump_suit, current_rank, jat),
-						"count": cards.size(),
-						"pattern": pattern,
-					}
+					session_controller.make_game_state(), rule_config)
+				session_controller.submit_play(seat, cards)
 
 				print("  %s 出: %s" % [SEAT_NAMES[seat], _cards_to_str(cards)])
 
 		# Execute trick
-		var result := game_round.play_trick(play_cards)
+		var result := session_controller.last_trick_result
 		var winner_name := SEAT_NAMES[result["winner"]]
 		var side_str := "攻方" if game_round.is_attack(result["winner"]) else "庄家方"
 		print("  → %s 赢墩 (%s) | 本墩得分: %d | 攻方总分: %d" % [

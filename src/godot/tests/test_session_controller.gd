@@ -154,6 +154,53 @@ func test_submit_bury_executes_bury_and_enters_playing() -> void:
 	assert_eq(controller.game_round.buried_bottom.size(), rc.bottom_size)
 
 
+func test_submit_play_rejects_wrong_turn() -> void:
+	_prepare_playing_round(55555)
+	var started := controller.begin_trick()
+	var wrong_seat: int = (started["lead_seat"] + 1) % 4
+	var card: Card = controller.game_round.get_hand(wrong_seat)[0]
+
+	var result := controller.submit_play(wrong_seat, [card])
+
+	assert_false(result["ok"])
+	assert_eq(result["error"], "wrong_turn")
+
+
+func test_submit_play_rejects_invalid_follow_without_mutating_hand() -> void:
+	_prepare_known_follow_round()
+	controller.begin_trick()
+	var lead_card := Card.normal(Card.Suit.CLUB, R.THREE)
+	var follow_card := Card.normal(Card.Suit.HEART, R.FIVE)
+
+	var lead_result := controller.submit_play(0, [lead_card])
+	var before_size := controller.game_round.get_hand_size(1)
+	var follow_result := controller.submit_play(1, [follow_card])
+
+	assert_true(lead_result["ok"])
+	assert_false(follow_result["ok"])
+	assert_eq(follow_result["error"], "invalid_follow")
+	assert_eq(controller.game_round.get_hand_size(1), before_size)
+
+
+func test_submit_play_resolves_trick_after_four_valid_plays() -> void:
+	_prepare_known_follow_round()
+	controller.begin_trick()
+
+	var r1 := controller.submit_play(0, [Card.normal(Card.Suit.CLUB, R.THREE)])
+	var r2 := controller.submit_play(1, [Card.normal(Card.Suit.CLUB, R.FOUR)])
+	var r3 := controller.submit_play(2, [Card.normal(Card.Suit.CLUB, R.FIVE)])
+	var r4 := controller.submit_play(3, [Card.normal(Card.Suit.CLUB, R.SIX)])
+
+	assert_true(r1["ok"])
+	assert_false(r1["trick_complete"])
+	assert_true(r2["ok"])
+	assert_true(r3["ok"])
+	assert_true(r4["ok"])
+	assert_true(r4["trick_complete"])
+	assert_eq(r4["result"]["winner"], 3)
+	assert_eq(controller.game_round.get_hand_size(0), 0)
+
+
 func _force_round_ready_for_settlement(
 	round: GameRound,
 	dealer: int,
@@ -175,3 +222,34 @@ func _force_round_ready_for_settlement(
 		attack_score -= 10
 	if attack_score >= 5:
 		round.score_tracker.record_trick([Card.normal(Card.Suit.SPADE, R.FIVE)], true)
+
+
+func _prepare_playing_round(seed_value: int) -> void:
+	controller.start_round(seed_value)
+	controller.resolve_no_bid_default()
+	var context := controller.get_bury_context()
+	var indices := AIPlayer.decide_bury(
+		context["merged_hand"],
+		context["bottom_size"],
+		context["trump_suit"],
+		context["current_rank"],
+		rc
+	)
+	controller.submit_bury(indices)
+
+
+func _prepare_known_follow_round() -> void:
+	controller.start_round(66666)
+	controller.resolve_no_bid_default()
+	controller.current_phase = "playing"
+	controller.game_round.current_lead_seat = 0
+	controller.game_round.hands = [
+		[Card.normal(Card.Suit.CLUB, R.THREE)],
+		[Card.normal(Card.Suit.CLUB, R.FOUR), Card.normal(Card.Suit.HEART, R.FIVE)],
+		[Card.normal(Card.Suit.CLUB, R.FIVE)],
+		[Card.normal(Card.Suit.CLUB, R.SIX)],
+	]
+	controller.game_round.trump_suit = -1
+	controller.game_round.current_rank = R.TWO
+	controller.state.current_rank = R.TWO
+	controller.rule_config.current_rank = R.TWO

@@ -459,6 +459,7 @@ func _on_bury_confirm() -> void:
 func _start_play_phase() -> void:
 	_log("\n[color=green]— 出牌阶段 —[/color]")
 	trick_num = 0
+	session_controller.current_phase = "playing"
 	_start_next_trick()
 
 
@@ -467,11 +468,12 @@ func _start_next_trick() -> void:
 		_finish_round()
 		return
 
-	trick_num += 1
-	trick_play_cards = []
-	trick_seat_index = 0
-	trick_seat_order = game_round.get_seat_order_from_lead()
-	trick_lead_info = {}
+	var trick_context := session_controller.begin_trick()
+	trick_num = trick_context["trick_num"]
+	trick_play_cards = session_controller.trick_play_cards
+	trick_seat_index = session_controller.trick_seat_index
+	trick_seat_order = session_controller.trick_seat_order
+	trick_lead_info = session_controller.trick_lead_info
 	table_cards = {}
 
 	_log("\n--- 第 %d 墩 | 先手: %s | 攻方: %d 分 ---" % [
@@ -484,11 +486,12 @@ func _start_next_trick() -> void:
 
 
 func _process_next_player() -> void:
-	if trick_seat_index >= 4:
+	var turn := session_controller.get_current_turn_context()
+	if turn.get("trick_ready", false):
 		_resolve_trick()
 		return
 
-	var seat: int = trick_seat_order[trick_seat_index]
+	var seat: int = turn["seat"]
 
 	if seat == human_seat:
 		_show_play_options(seat)
@@ -497,26 +500,26 @@ func _process_next_player() -> void:
 
 
 func _ai_play(seat: int) -> void:
-	var hand := game_round.get_hand(seat)
-	var gs := _make_game_state()
-	var cards := AIPlayer.decide_play(seat, hand, trick_lead_info, gs, rule_config)
-
-	if trick_lead_info.is_empty():
-		_set_lead_info(cards)
-
-	trick_play_cards.append(cards)
+	var turn := session_controller.get_current_turn_context()
+	var hand: Array = turn["hand"]
+	var cards := AIPlayer.decide_play(seat, hand, turn["lead_info"], turn["game_state"], rule_config)
+	var result := session_controller.submit_play(seat, cards)
+	_sync_trick_host_from_controller()
 	table_cards[seat] = _cards_str(cards)
 	_update_table()
 	_log("  %s 出: %s" % [SEAT_NAMES[seat], _cards_str(cards)])
 
-	trick_seat_index += 1
+	if result.get("trick_complete", false):
+		_resolve_trick()
+		return
 	# Small delay for readability
 	get_tree().create_timer(0.3).timeout.connect(_process_next_player)
 
 
 func _show_play_options(seat: int) -> void:
-	var hand := game_round.get_hand(seat)
-	var is_leading := trick_lead_info.is_empty()
+	var turn := session_controller.get_current_turn_context()
+	var hand: Array = turn["hand"]
+	var is_leading: bool = turn["is_leading"]
 
 	if is_leading:
 		current_phase = "leading"
@@ -578,36 +581,29 @@ func _on_play_confirm() -> void:
 					cards.append(selected_card)
 
 	# Validate
-	var jat := rule_config.joker_always_trump
-	if trick_lead_info.is_empty():
-		# Leading
-		var pattern := PlayValidator.validate_lead(cards, game_round.get_hand(human_seat),
-			game_round.trump_suit, current_rank, rule_config)
-		if pattern == null:
-			_log("[color=red]出牌不合法，请重新选择[/color]")
-			return
-		_set_lead_info(cards)
-	else:
-		# Following
-		var lead_count: int = trick_play_cards[0].size()
-		if cards.size() != lead_count:
-			_log("[color=red]需要出 %d 张牌（当前选了 %d 张）[/color]" % [lead_count, cards.size()])
-			return
-		var valid := PlayValidator.validate_follow(cards, game_round.get_hand(human_seat),
-			lead_count, trick_lead_info["domain"], game_round.trump_suit, current_rank, rule_config)
-		if not valid:
+	var submit := session_controller.submit_play(human_seat, cards)
+	if not submit["ok"]:
+		var err: String = submit["error"]
+		if err == "wrong_card_count":
+			var turn := session_controller.get_current_turn_context()
+			_log("[color=red]需要出 %d 张牌（当前选了 %d 张）[/color]" % [turn["lead_count"], cards.size()])
+		elif err == "invalid_follow":
 			_log("[color=red]跟牌不合法，请重新选择[/color]")
-			return
+		else:
+			_log("[color=red]出牌不合法，请重新选择: %s[/color]" % err)
+		return
 
 	waiting_for_input = false
-	trick_play_cards.append(cards)
+	_sync_trick_host_from_controller()
 	table_cards[human_seat] = _cards_str(cards)
 	_update_table()
 	_log("  你出: %s" % _cards_str(cards))
 
 	selected_indices = []
 	_clear_actions()
-	trick_seat_index += 1
+	if submit.get("trick_complete", false):
+		_resolve_trick()
+		return
 	_process_next_player()
 
 
@@ -623,7 +619,7 @@ func _set_lead_info(cards: Array) -> void:
 
 
 func _resolve_trick() -> void:
-	var result := game_round.play_trick(trick_play_cards)
+	var result := session_controller.last_trick_result
 	var winner_name := SEAT_NAMES[result["winner"]]
 	var side := "攻方" if game_round.is_attack(result["winner"]) else "庄家方"
 	_log("  → %s 赢墩 (%s) | 本墩: %d 分 | 攻方总分: %d" % [
@@ -737,6 +733,15 @@ func _sync_host_from_controller() -> void:
 	current_rank = session_controller.state.current_rank
 	round_num = session_controller.state.round_num
 	is_first_game = session_controller.state.is_first_game
+
+
+func _sync_trick_host_from_controller() -> void:
+	if session_controller == null:
+		return
+	trick_play_cards = session_controller.trick_play_cards
+	trick_seat_index = session_controller.trick_seat_index
+	trick_seat_order = session_controller.trick_seat_order
+	trick_lead_info = session_controller.trick_lead_info
 
 
 # ============================================================
