@@ -7,18 +7,23 @@
 ## [Unreleased]
 
 ### 新增
+- 共享 `SessionState` / `SessionController`：自动宿主与 TUI 宿主共用同一套开局、亮主、配底、出牌、结算和跨局状态推进路径。
 - 两队独立级：南北队/东西队分别维护等级，每局按实际庄家队伍等级开局，攻方升级按攻方自身等级结算。
 - 日志复盘 HTML 导出器：支持每局切换、每墩围桌展示、初始手牌、出牌前后手牌、出牌高亮、庄家顺延原因和人工订正导出。
 - 日志复盘标准样例：新增 `docs/game-logs/standard_log.json` 作为分析器回归样例。
+- 自动宿主新增 `--max-rounds`、`--log-path` 与基础 `--seed` 参数，便于生成可复现的验证日志。
 
 ### 修复
 - 修复定主顺延后本局等级未同步到实际庄家队伍的问题。
 - 修复未下庄时下一局仍从旧 `current_dealer` 轮询定主的问题，改为沿用本局实际庄家。
 - 修复攻方升级时错误使用庄家方等级作为升级基准的问题。
+- 修复 TUI 长局运行时界面日志无限增长导致的出牌卡顿，UI 日志改为固定行数缓冲。
 
 ### 变更
-- 日志新增 `team_ranks`、`team_ranks_symbols`、每墩 `hands_after`，并将 `hands_before/hands_after` 统一为 TUI 展示顺序。
+- `game_session.gd` 降级为自动宿主，`tui_game.gd` 降级为 UI 宿主；二者通过 controller 阶段 API 提交亮主、配底、出牌和结算。
+- 日志新增 `team_ranks`、`team_ranks_symbols`，并移除每墩 `hands_before/hands_after` 冗余快照；HTML 导出器在生成报告时从初始手牌、埋牌和出牌记录重建每墩前后手牌。
 - AI 定主跳过原因细分为 `no_valid_cards` 与 `ai_pass`，HTML 报告中明确展示庄家顺延原因。
+- TUI 自动保存改为 compact JSON，并取消每墩结束后的完整日志写盘，只在配底、结算、游戏结束和手动保存时写盘。
 
 ---
 

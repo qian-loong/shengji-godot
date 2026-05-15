@@ -4,6 +4,7 @@ extends Control
 
 const SEAT_NAMES: Array[String] = ["你(南)", "AI-东", "搭档(北)", "AI-西"]
 # 逆时针座位顺序: 南(0/下) → 东(1/右) → 北(2/上) → 西(3/左)
+const UI_LOG_MAX_LINES: int = 300
 
 # ============================================================
 # UI nodes (created in _ready)
@@ -21,6 +22,7 @@ var scroll_container: ScrollContainer
 var rule_config: RuleConfig
 var game_round: GameRound
 var logger: GameLogger
+var session_controller: SessionController
 
 var human_seat: int = 0
 var current_dealer: int = 0
@@ -43,6 +45,7 @@ var trick_num: int = 0
 
 # Display state
 var table_cards: Dictionary = {}  # seat -> card string
+var ui_log_lines: Array[String] = []
 
 
 func _ready() -> void:
@@ -151,6 +154,10 @@ func _build_ui() -> void:
 # ============================================================
 
 func _start_new_game() -> void:
+	ui_log_lines = []
+	if log_label != null:
+		log_label.clear()
+
 	rule_config = RuleConfig.new()
 	rule_config.deck_count = 2
 	rule_config.current_rank = Card.Rank.TWO
@@ -161,12 +168,15 @@ func _start_new_game() -> void:
 
 	logger = GameLogger.new(true)
 	logger.set_rule_config(rule_config)
+	session_controller = SessionController.new()
+	session_controller.start_new_session(rule_config, logger, human_seat)
 	_auto_save_log()
 
 	team_ranks = [Card.Rank.TWO, Card.Rank.TWO]
 	current_dealer = 0
 	round_num = 0
 	is_first_game = true
+	_sync_controller_from_host_state()
 
 	_log("[color=yellow]═══ 双升对局 — TUI 版 ═══[/color]")
 	_start_round()
@@ -178,12 +188,11 @@ func _start_round() -> void:
 	rule_config.current_rank = current_rank
 	var round_seed := randi()
 
-	game_round = GameRound.new()
-	game_round.setup(rule_config, current_dealer)
-	game_round.logger = logger
-	logger.begin_round(round_num, current_rank, current_dealer, round_seed, team_ranks)
-
-	game_round.deal(round_seed)
+	# Controller owns round_num increment; host increments only for legacy display state.
+	round_num -= 1
+	_sync_controller_from_host_state()
+	session_controller.start_round(round_seed)
+	_sync_host_from_controller()
 
 	var trump_str := Card.rank_symbol(current_rank)
 	var dealer_team_name: String = ["南北队", "东西队"][current_dealer % 2] as String
@@ -203,17 +212,18 @@ func _start_round() -> void:
 
 func _start_bidding() -> void:
 	current_phase = "bidding"
+	session_controller.current_phase = "bidding"
 
 	if is_first_game:
 		_log("\n[color=green]— 亮主阶段（首局·先到先得）—[/color]")
 		# MVP简化：首局一次发完牌，先问人类再轮询AI
-		var human_bids := TrumpBidding.get_available_bids(human_seat,
-			game_round.get_hand(human_seat), current_rank, rule_config)
+		var context := session_controller.get_bidding_context(human_seat)
+		var human_bids: Array = context["available_bids"]
 		if not human_bids.is_empty():
 			_show_bid_options(human_bids)
 		else:
 			_log("你没有可亮的牌")
-			logger.log_bid_attempt(human_seat, "skip", "no_valid_cards")
+			session_controller.submit_bid_or_pass(human_seat, null, "no_valid_cards")
 			_finish_bidding_round()
 	else:
 		_log("\n[color=green]— 亮主阶段（从庄家开始轮询）—[/color]")
@@ -228,36 +238,36 @@ func _process_next_bidder() -> void:
 		return
 	if _bid_seat_index >= 4:
 		# All 4 players checked, no one bid
-		game_round.set_no_bid_default(current_dealer)
+		session_controller.resolve_no_bid_default()
 		_log("无人亮主，默认 %s 为庄家，公主局" % SEAT_NAMES[current_dealer])
 		_finish_bidding()
 		return
 
 	var seat := (current_dealer + _bid_seat_index) % 4
-	var hand := game_round.get_hand(seat)
-	var bid_rank := _get_team_rank_for_seat(seat)
+	var context := session_controller.get_bidding_context(seat)
+	var hand: Array = context["hand"]
+	var bid_rank: int = context["bid_rank"]
 
 	if seat == human_seat:
-		var human_bids := TrumpBidding.get_available_bids(seat, hand, bid_rank, rule_config)
+		var human_bids: Array = context["available_bids"]
 		if not human_bids.is_empty():
 			_show_bid_options(human_bids)
 			return  # Wait for player input
 		else:
 			_log("你没有可亮的牌（跳过）")
-			logger.log_bid_attempt(seat, "skip", "no_valid_cards")
+			session_controller.submit_bid_or_pass(seat, null, "no_valid_cards")
 	else:
-		var available_bids := TrumpBidding.get_available_bids(seat, hand, bid_rank, rule_config)
+		var available_bids: Array = context["available_bids"]
 		var decl := AIPlayer.decide_bid(seat, hand, bid_rank, rule_config)
-		if decl != null and game_round.process_bid(decl):
+		var bid_result := session_controller.submit_bid_or_pass(seat, decl) if decl != null else session_controller.submit_bid_or_pass(seat, null, "no_valid_cards" if available_bids.is_empty() else "ai_pass")
+		if decl != null and bid_result["ok"] and session_controller.current_phase == "burying":
 			var s := "公主" if decl.suit < 0 else Card.suit_symbol(decl.suit)
 			_log("%s 亮主: %s" % [SEAT_NAMES[seat], s])
-			logger.log_bid_attempt(seat, "bid", "", decl.suit)
+			_sync_host_from_controller()
 			_finish_bidding()
 			return
 		else:
 			_log("%s 跳过" % SEAT_NAMES[seat])
-			var reason := "no_valid_cards" if available_bids.is_empty() else "ai_pass"
-			logger.log_bid_attempt(seat, "skip", reason)
 
 	_bid_seat_index += 1
 	_process_next_bidder()
@@ -272,29 +282,29 @@ func _finish_bidding_round() -> void:
 			var seat := (current_dealer + i) % 4
 			if seat == human_seat:
 				continue
-			var hand := game_round.get_hand(seat)
-			var bid_rank := _get_team_rank_for_seat(seat)
-			var available_bids := TrumpBidding.get_available_bids(seat, hand, bid_rank, rule_config)
+			var context := session_controller.get_bidding_context(seat)
+			var hand: Array = context["hand"]
+			var bid_rank: int = context["bid_rank"]
+			var available_bids: Array = context["available_bids"]
 			var decl := AIPlayer.decide_bid(seat, hand, bid_rank, rule_config)
-			if decl != null and game_round.process_bid(decl):
+			var bid_result := session_controller.submit_bid_or_pass(seat, decl) if decl != null else session_controller.submit_bid_or_pass(seat, null, "no_valid_cards" if available_bids.is_empty() else "ai_pass")
+			if decl != null and bid_result["ok"] and session_controller.current_phase == "burying":
 				bid_made = true
 				var s := "公主" if decl.suit < 0 else Card.suit_symbol(decl.suit)
 				_log("%s 亮主: %s" % [SEAT_NAMES[seat], s])
-				logger.log_bid_attempt(seat, "bid", "", decl.suit)
 				break
-			else:
-				var reason := "no_valid_cards" if available_bids.is_empty() else "ai_pass"
-				logger.log_bid_attempt(seat, "skip", reason)
 
 	if not bid_made:
-		game_round.set_no_bid_default(current_dealer)
+		session_controller.resolve_no_bid_default()
 		_log("无人亮主，默认 %s 为庄家，公主局" % SEAT_NAMES[current_dealer])
 
 	_finish_bidding()
 
 
 func _finish_bidding() -> void:
-	_sync_rank_to_actual_dealer()
+	if session_controller.current_phase == "bidding":
+		session_controller.finish_bidding_if_ready()
+	_sync_host_from_controller()
 	_log("主花色: %s | 庄家: %s" % [_trump_str(), SEAT_NAMES[game_round.dealer_seat]])
 	_update_info()
 	_start_bury()
@@ -322,10 +332,10 @@ func _on_bid_selected(bids: Array, index: int) -> void:
 		return
 	waiting_for_input = false
 	var decl: TrumpBidding.BidDeclaration = bids[index]
-	game_round.process_bid(decl)
+	session_controller.submit_bid_or_pass(human_seat, decl)
+	_sync_host_from_controller()
 	var s := "公主" if decl.suit < 0 else Card.suit_symbol(decl.suit)
 	_log("你亮主: %s" % s)
-	logger.log_bid_attempt(human_seat, "bid", "", decl.suit)
 	_clear_actions()
 	if is_first_game:
 		_finish_bidding_round()  # First game: no more bids after first one
@@ -338,7 +348,7 @@ func _on_bid_skip() -> void:
 		return
 	waiting_for_input = false
 	_log("你选择不亮")
-	logger.log_bid_attempt(human_seat, "skip", "player_choice")
+	session_controller.submit_bid_or_pass(human_seat, null, "player_choice")
 	_clear_actions()
 	if is_first_game:
 		_finish_bidding_round()  # Let AI try
@@ -353,20 +363,21 @@ func _on_bid_skip() -> void:
 
 func _start_bury() -> void:
 	current_phase = "burying"
-	var dealer := game_round.dealer_seat
+	var context := session_controller.get_bury_context()
+	var dealer: int = context["dealer"]
 
 	if dealer != human_seat:
 		# AI bury
-		var merged := game_round.get_dealer_hand_with_bottom()
+		var merged: Array = context["merged_hand"]
 		var indices := AIPlayer.decide_bury(merged, rule_config.bottom_size,
 			game_round.trump_suit, current_rank, rule_config)
-		game_round.execute_bury(indices)
+		session_controller.submit_bury(indices)
 		_log("%s 完成配底" % SEAT_NAMES[dealer])
 		_auto_save_log()
 		_start_play_phase()
 	else:
 		# Human bury
-		var merged := game_round.get_dealer_hand_with_bottom()
+		var merged: Array = context["merged_hand"]
 		_log("\n[color=green]— 配底阶段 —[/color] 选 %d 张扣底" % rule_config.bottom_size)
 		selected_indices = []
 		_refresh_hand_display_for_bury(merged)
@@ -437,7 +448,7 @@ func _on_bury_confirm() -> void:
 						used[i] = true
 						break
 
-	var result := game_round.execute_bury(actual_indices)
+	var result := session_controller.submit_bury(actual_indices)
 	if result["ok"]:
 		_log("配底完成")
 		_auto_save_log()
@@ -454,6 +465,7 @@ func _on_bury_confirm() -> void:
 func _start_play_phase() -> void:
 	_log("\n[color=green]— 出牌阶段 —[/color]")
 	trick_num = 0
+	session_controller.current_phase = "playing"
 	_start_next_trick()
 
 
@@ -462,11 +474,12 @@ func _start_next_trick() -> void:
 		_finish_round()
 		return
 
-	trick_num += 1
-	trick_play_cards = []
-	trick_seat_index = 0
-	trick_seat_order = game_round.get_seat_order_from_lead()
-	trick_lead_info = {}
+	var trick_context := session_controller.begin_trick()
+	trick_num = trick_context["trick_num"]
+	trick_play_cards = session_controller.trick_play_cards
+	trick_seat_index = session_controller.trick_seat_index
+	trick_seat_order = session_controller.trick_seat_order
+	trick_lead_info = session_controller.trick_lead_info
 	table_cards = {}
 
 	_log("\n--- 第 %d 墩 | 先手: %s | 攻方: %d 分 ---" % [
@@ -479,11 +492,12 @@ func _start_next_trick() -> void:
 
 
 func _process_next_player() -> void:
-	if trick_seat_index >= 4:
+	var turn := session_controller.get_current_turn_context()
+	if turn.get("trick_ready", false):
 		_resolve_trick()
 		return
 
-	var seat: int = trick_seat_order[trick_seat_index]
+	var seat: int = turn["seat"]
 
 	if seat == human_seat:
 		_show_play_options(seat)
@@ -492,26 +506,26 @@ func _process_next_player() -> void:
 
 
 func _ai_play(seat: int) -> void:
-	var hand := game_round.get_hand(seat)
-	var gs := _make_game_state()
-	var cards := AIPlayer.decide_play(seat, hand, trick_lead_info, gs, rule_config)
-
-	if trick_lead_info.is_empty():
-		_set_lead_info(cards)
-
-	trick_play_cards.append(cards)
+	var turn := session_controller.get_current_turn_context()
+	var hand: Array = turn["hand"]
+	var cards := AIPlayer.decide_play(seat, hand, turn["lead_info"], turn["game_state"], rule_config)
+	var result := session_controller.submit_play(seat, cards)
+	_sync_trick_host_from_controller()
 	table_cards[seat] = _cards_str(cards)
 	_update_table()
 	_log("  %s 出: %s" % [SEAT_NAMES[seat], _cards_str(cards)])
 
-	trick_seat_index += 1
+	if result.get("trick_complete", false):
+		_resolve_trick()
+		return
 	# Small delay for readability
 	get_tree().create_timer(0.3).timeout.connect(_process_next_player)
 
 
 func _show_play_options(seat: int) -> void:
-	var hand := game_round.get_hand(seat)
-	var is_leading := trick_lead_info.is_empty()
+	var turn := session_controller.get_current_turn_context()
+	var hand: Array = turn["hand"]
+	var is_leading: bool = turn["is_leading"]
 
 	if is_leading:
 		current_phase = "leading"
@@ -573,61 +587,40 @@ func _on_play_confirm() -> void:
 					cards.append(selected_card)
 
 	# Validate
-	var jat := rule_config.joker_always_trump
-	if trick_lead_info.is_empty():
-		# Leading
-		var pattern := PlayValidator.validate_lead(cards, game_round.get_hand(human_seat),
-			game_round.trump_suit, current_rank, rule_config)
-		if pattern == null:
-			_log("[color=red]出牌不合法，请重新选择[/color]")
-			return
-		_set_lead_info(cards)
-	else:
-		# Following
-		var lead_count: int = trick_play_cards[0].size()
-		if cards.size() != lead_count:
-			_log("[color=red]需要出 %d 张牌（当前选了 %d 张）[/color]" % [lead_count, cards.size()])
-			return
-		var valid := PlayValidator.validate_follow(cards, game_round.get_hand(human_seat),
-			lead_count, trick_lead_info["domain"], game_round.trump_suit, current_rank, rule_config)
-		if not valid:
+	var submit := session_controller.submit_play(human_seat, cards)
+	if not submit["ok"]:
+		var err: String = submit["error"]
+		if err == "wrong_card_count":
+			var turn := session_controller.get_current_turn_context()
+			_log("[color=red]需要出 %d 张牌（当前选了 %d 张）[/color]" % [turn["lead_count"], cards.size()])
+		elif err == "invalid_follow":
 			_log("[color=red]跟牌不合法，请重新选择[/color]")
-			return
+		else:
+			_log("[color=red]出牌不合法，请重新选择: %s[/color]" % err)
+		return
 
 	waiting_for_input = false
-	trick_play_cards.append(cards)
+	_sync_trick_host_from_controller()
 	table_cards[human_seat] = _cards_str(cards)
 	_update_table()
 	_log("  你出: %s" % _cards_str(cards))
 
 	selected_indices = []
 	_clear_actions()
-	trick_seat_index += 1
+	if submit.get("trick_complete", false):
+		_resolve_trick()
+		return
 	_process_next_player()
 
 
-func _set_lead_info(cards: Array) -> void:
-	var jat := rule_config.joker_always_trump
-	var pattern := CardPattern.identify(cards, current_rank,
-		rule_config.tractor_allow_rank_card, rule_config.four_same_is_tractor)
-	trick_lead_info = {
-		"domain": TrumpJudge.get_suit_domain(cards[0], game_round.trump_suit, current_rank, jat),
-		"count": cards.size(),
-		"pattern": pattern,
-	}
-
-
 func _resolve_trick() -> void:
-	var result := game_round.play_trick(trick_play_cards)
+	var result := session_controller.last_trick_result
 	var winner_name := SEAT_NAMES[result["winner"]]
 	var side := "攻方" if game_round.is_attack(result["winner"]) else "庄家方"
 	_log("  → %s 赢墩 (%s) | 本墩: %d 分 | 攻方总分: %d" % [
 		winner_name, side, result["score"], result["attack_score"]])
 
 	_update_info()
-
-	# 每墩结束后自动保存
-	_auto_save_log()
 
 	if result["is_last"]:
 		_finish_round()
@@ -637,9 +630,9 @@ func _resolve_trick() -> void:
 
 
 func _finish_round() -> void:
-	var attack_rank := team_ranks[_get_attack_team(game_round.dealer_seat)]
-	var settlement := game_round.calculate_settlement(attack_rank)
-	logger.end_round()
+	var finish := session_controller.finish_round()
+	var settlement: UpgradeSettlement.SettlementResult = finish["settlement"]
+	_sync_host_from_controller()
 
 	_log("\n[color=yellow]═══════ 结算 ═══════[/color]")
 	_log("出牌阶段攻方得分: %d" % settlement.attack_base_score)
@@ -649,7 +642,7 @@ func _finish_round() -> void:
 		_log("庄家方赢最后一墩，底牌不计分")
 	_log("最终得分: %d" % settlement.final_score)
 
-	var upgrading_team := _get_upgrading_team(settlement)
+	var upgrading_team := finish["upgrading_team"] as int
 	var team_names: Array[String] = ["南北队", "东西队"]
 	var team_name: String = team_names[upgrading_team]
 
@@ -660,12 +653,7 @@ func _finish_round() -> void:
 	else:
 		_log("庄家方守住")
 
-	# Update team rank
-	if settlement.upgrade_levels > 0:
-		team_ranks[upgrading_team] = settlement.new_rank
-
 	_auto_save_log()
-	is_first_game = false
 
 	if settlement.game_over:
 		_log("\n[color=yellow]🏆 游戏结束！%s 获胜！[/color]" % team_name)
@@ -674,11 +662,6 @@ func _finish_round() -> void:
 		var restart_btn := _make_button("再来一局", func() -> void: _start_new_game())
 		action_container.add_child(restart_btn)
 	else:
-		if settlement.new_dealer >= 0:
-			current_dealer = settlement.new_dealer
-		else:
-			current_dealer = game_round.dealer_seat
-
 		_log("  南北队: %s 级 | 东西队: %s 级" % [
 			Card.rank_symbol(team_ranks[0]), Card.rank_symbol(team_ranks[1])])
 
@@ -689,27 +672,35 @@ func _finish_round() -> void:
 		action_container.add_child(save_btn)
 
 
-func _get_upgrading_team(settlement: UpgradeSettlement.SettlementResult) -> int:
-	if settlement.upgrading_side == 0:
-		return game_round.dealer_seat % 2  # Dealer's team
-	else:
-		return _get_attack_team(game_round.dealer_seat)
+func _sync_controller_from_host_state() -> void:
+	if session_controller == null:
+		return
+	session_controller.state.team_ranks = team_ranks.duplicate()
+	session_controller.state.current_dealer = current_dealer
+	session_controller.state.current_rank = current_rank
+	session_controller.state.round_num = round_num
+	session_controller.state.is_first_game = is_first_game
+	session_controller.state.human_seat = human_seat
 
 
-static func _get_attack_team(dealer: int) -> int:
-	return (dealer + 1) % 2
+func _sync_host_from_controller() -> void:
+	if session_controller == null:
+		return
+	game_round = session_controller.game_round
+	team_ranks = session_controller.state.team_ranks.duplicate()
+	current_dealer = session_controller.state.current_dealer
+	current_rank = session_controller.state.current_rank
+	round_num = session_controller.state.round_num
+	is_first_game = session_controller.state.is_first_game
 
 
-func _get_team_rank_for_seat(seat: int) -> int:
-	return team_ranks[seat % 2]
-
-
-func _sync_rank_to_actual_dealer() -> void:
-	current_rank = _get_team_rank_for_seat(game_round.dealer_seat)
-	rule_config.current_rank = current_rank
-	game_round.current_rank = current_rank
-	if logger:
-		logger.update_round_rank(current_rank, team_ranks)
+func _sync_trick_host_from_controller() -> void:
+	if session_controller == null:
+		return
+	trick_play_cards = session_controller.trick_play_cards
+	trick_seat_index = session_controller.trick_seat_index
+	trick_seat_order = session_controller.trick_seat_order
+	trick_lead_info = session_controller.trick_lead_info
 
 
 # ============================================================
@@ -718,7 +709,7 @@ func _sync_rank_to_actual_dealer() -> void:
 
 ## 自动保存（静默，覆盖同一文件，不打日志）
 func _auto_save_log() -> void:
-	logger.save_to_file(_resolve_log_path("game_log_latest.json"))
+	logger.save_to_file(_resolve_log_path("game_log_latest.json"), false)
 
 
 ## 手动保存（按钮触发，带时间戳，显示路径）
@@ -829,7 +820,10 @@ func _update_table() -> void:
 
 
 func _log(msg: String) -> void:
-	log_label.append_text(msg + "\n")
+	ui_log_lines.append(msg)
+	while ui_log_lines.size() > UI_LOG_MAX_LINES:
+		ui_log_lines.remove_at(0)
+	log_label.text = "\n".join(ui_log_lines) + "\n"
 	# Auto scroll to bottom
 	await get_tree().process_frame
 	scroll_container.scroll_vertical = int(log_label.size.y)
@@ -898,15 +892,6 @@ func _card_identity_key(card: Card) -> String:
 	if card.is_joker:
 		return "joker_%d" % card.joker_type
 	return "%d_%02d" % [card.suit, card.rank]
-
-
-func _make_game_state() -> Dictionary:
-	return {
-		"trump_suit": game_round.trump_suit,
-		"current_rank": current_rank,
-		"dealer_seat": game_round.dealer_seat,
-		"attack_score": game_round.score_tracker.get_attack_score(),
-	}
 
 
 # ============================================================

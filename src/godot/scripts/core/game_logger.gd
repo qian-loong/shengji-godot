@@ -175,41 +175,17 @@ func begin_trick(trick_num: int, lead_seat: int, attack_score: int) -> void:
 	}
 	if _debug_enabled:
 		_current_trick["debug"] = {
-			"hands_before": [],
-			"hands_after": [],
 			"domain_info": [],
 			"winner_reason": "",
 		}
 
 
-func log_hands_before_trick(hands: Array, trump_suit: int, current_rank: int, jat: bool) -> void:
-	if not _debug_enabled:
-		return
-	var snapshots: Array = []
-	for i: int in range(hands.size()):
-		var display_hand := _sort_hand_for_display(hands[i], trump_suit, current_rank, jat)
-		var hand_info: Dictionary = {
-			"seat": i,
-			"cards": _cards_to_strs(display_hand),
-			"count": hands[i].size(),
-		}
-		snapshots.append(hand_info)
-	_current_trick["debug"]["hands_before"] = snapshots
+func log_hands_before_trick(_hands: Array, _trump_suit: int, _current_rank: int, _jat: bool) -> void:
+	pass
 
 
-func log_hands_after_trick(hands: Array, trump_suit: int, current_rank: int, jat: bool) -> void:
-	if not _debug_enabled:
-		return
-	var snapshots: Array = []
-	for i: int in range(hands.size()):
-		var display_hand := _sort_hand_for_display(hands[i], trump_suit, current_rank, jat)
-		var hand_info: Dictionary = {
-			"seat": i,
-			"cards": _cards_to_strs(display_hand),
-			"count": hands[i].size(),
-		}
-		snapshots.append(hand_info)
-	_current_trick["debug"]["hands_after"] = snapshots
+func log_hands_after_trick(_hands: Array, _trump_suit: int, _current_rank: int, _jat: bool) -> void:
+	pass
 
 
 func log_play(seat: int, cards: Array, trump_suit: int, current_rank: int, jat: bool) -> void:
@@ -299,14 +275,14 @@ func to_json(pretty: bool = true) -> String:
 	return JSON.stringify(snapshot)
 
 
-func save_to_file(path: String) -> Error:
+func save_to_file(path: String, pretty: bool = true) -> Error:
 	var dir_path := path.get_base_dir()
 	if dir_path != "" and not DirAccess.dir_exists_absolute(dir_path):
 		DirAccess.make_dir_recursive_absolute(dir_path)
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
 		return FileAccess.get_open_error()
-	file.store_string(to_json())
+	file.store_string(to_json(pretty))
 	file.close()
 	return OK
 
@@ -372,48 +348,6 @@ static func _cards_to_strs(cards: Array) -> Array[String]:
 	for c: Card in cards:
 		result.append(c.to_string_repr())
 	return result
-
-
-static func _sort_hand_for_display(hand: Array, trump_suit: int, current_rank: int, jat: bool) -> Array:
-	var sorted := hand.duplicate()
-	sorted.sort_custom(func(a: Card, b: Card) -> bool:
-		return _card_display_less(a, b, trump_suit, current_rank, jat)
-	)
-	return sorted
-
-
-static func _card_display_less(a: Card, b: Card, trump_suit: int, current_rank: int, jat: bool) -> bool:
-	var group_a := _card_display_group(a, trump_suit, current_rank, jat)
-	var group_b := _card_display_group(b, trump_suit, current_rank, jat)
-	if group_a != group_b:
-		return group_a < group_b
-	var value_a := TrumpJudge.get_sort_value(a, trump_suit, current_rank, jat)
-	var value_b := TrumpJudge.get_sort_value(b, trump_suit, current_rank, jat)
-	if value_a != value_b:
-		return value_a > value_b
-	return _card_identity_key(a) < _card_identity_key(b)
-
-
-static func _card_display_group(card: Card, trump_suit: int, current_rank: int, jat: bool) -> int:
-	if TrumpJudge.is_trump(card, trump_suit, current_rank, jat):
-		return 0
-	match card.suit:
-		Card.Suit.CLUB:
-			return 1
-		Card.Suit.HEART:
-			return 2
-		Card.Suit.SPADE:
-			return 3
-		Card.Suit.DIAMOND:
-			return 4
-		_:
-			return 5
-
-
-static func _card_identity_key(card: Card) -> String:
-	if card.is_joker:
-		return "joker_%d" % card.joker_type
-	return "%d_%02d" % [card.suit, card.rank]
 
 
 static func _pattern_to_str(pattern: CardPattern.PatternResult) -> String:

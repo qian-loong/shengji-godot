@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-05-15
+
+### 变更
+- 日志格式不再保存每墩 `debug.hands_before` / `debug.hands_after` 冗余快照。
+- HTML 导出器改为从 `initial_hands`、`hand_with_bottom`、`buried_cards` 和每墩 `plays` 重建出牌前/出牌后手牌。
+- 自动保存日志可使用 compact JSON；HTML 导出仍使用标准 JSON 解析，不依赖格式化缩进。
+
+### 兼容
+- 当前导出器只支持新日志格式；旧格式兼容分支已移除，标准样例日志同步重生成。
+
+---
+
 ## 2026-05-14
 
 ### 新增
@@ -21,5 +33,4 @@
 - 庄家顺延、实际庄家队伍等级与本局打级一致性。
 
 ### 兼容
-- 对旧日志缺失 `hands_after` 的情况，HTML 导出器会用 `hands_before - plays` 推导出牌后手牌。
 - 对进行中的未结算局，跳过空 `settlement` 字段复核，避免误报。
