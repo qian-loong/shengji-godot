@@ -566,21 +566,17 @@ def describe_dealer_rotation(expected_dealer: Optional[int], actual_dealer: int,
 
 
 def find_hand_before(trick: Dict[str, Any], seat: int) -> List[str]:
-    for hand in trick.get("debug", {}).get("hands_before", []):
+    for hand in trick.get("_hands_before", []):
         if hand.get("seat") == seat:
             return hand.get("cards", [])
     return []
 
 
 def find_hand_after(trick: Dict[str, Any], seat: int) -> List[str]:
-    for hand in trick.get("debug", {}).get("hands_after", []):
+    for hand in trick.get("_hands_after", []):
         if hand.get("seat") == seat:
             return hand.get("cards", [])
-    before = find_hand_before(trick, seat)
-    play = next((p for p in trick.get("plays", []) if p.get("seat") == seat), None)
-    if not before or not play:
-        return []
-    return remove_cards(before, play.get("cards", []))
+    return []
 
 
 def remove_cards(source: List[str], removed: Iterable[str]) -> List[str]:
@@ -591,6 +587,44 @@ def remove_cards(source: List[str], removed: Iterable[str]) -> List[str]:
         except ValueError:
             pass
     return result
+
+
+def reconstruct_hand_snapshots(log: Dict[str, Any]) -> None:
+    for round_data in log.get("rounds", []):
+        tricks = round_data.get("tricks", [])
+        if not tricks:
+            continue
+
+        debug = round_data.get("debug", {})
+        initial_hands = debug.get("initial_hands", [])
+        if len(initial_hands) != 4:
+            raise ValueError(f"Round {round_data.get('round_num')} missing debug.initial_hands")
+
+        hands = [list(hand) for hand in initial_hands]
+        dealer = int(round_data.get("dealer", 0))
+        hand_with_bottom = debug.get("hand_with_bottom", [])
+        buried_cards = debug.get("buried_cards", [])
+        if not hand_with_bottom:
+            raise ValueError(f"Round {round_data.get('round_num')} missing debug.hand_with_bottom")
+        hands[dealer] = remove_cards(list(hand_with_bottom), buried_cards)
+
+        for trick in tricks:
+            trick["_hands_before"] = hand_snapshots(hands)
+            for play in trick.get("plays", []):
+                seat = int(play.get("seat", 0))
+                hands[seat] = remove_cards(hands[seat], play.get("cards", []))
+            trick["_hands_after"] = hand_snapshots(hands)
+
+
+def hand_snapshots(hands: List[List[str]]) -> List[Dict[str, Any]]:
+    return [
+        {"seat": seat, "cards": list(hand), "count": len(hand)}
+        for seat, hand in enumerate(hands)
+    ]
+
+
+def normalize_html_output(content: str) -> str:
+    return "\n".join(line.rstrip() for line in content.splitlines()) + "\n"
 
 
 def update_team_ranks(team_ranks: List[int], expected: Dict[str, Any]) -> Optional[List[int]]:
@@ -1053,10 +1087,11 @@ def main() -> None:
     log_path = Path(args.log_file)
     with log_path.open("r", encoding="utf-8") as f:
         log = json.load(f)
+    reconstruct_hand_snapshots(log)
     analysis = analyze_log(log)
     output = Path(args.output) if args.output else log_path.with_suffix(".html")
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(render_html(log, analysis, log_path), encoding="utf-8")
+    output.write_text(normalize_html_output(render_html(log, analysis, log_path)), encoding="utf-8")
     errors = sum(1 for i in analysis["issues"] if i["level"] == "error")
     warnings = sum(1 for i in analysis["issues"] if i["level"] == "warning")
     print(f"HTML replay written: {output}")

@@ -14,6 +14,8 @@ var current_rank: int = Card.Rank.TWO  # current round's rank (derived from deal
 var is_first_game: bool = true
 var round_num: int = 0
 var game_seed: int = -1  # -1 = random
+var max_rounds: int = -1  # -1 = run until game over
+var log_path_override: String = ""
 
 const SEAT_NAMES: Array[String] = ["你(南)", "AI-东", "搭档(北)", "AI-西"]
 const TEAM_NAMES: Array[String] = ["南北队", "东西队"]
@@ -31,13 +33,20 @@ func _init() -> void:
 	for arg: String in OS.get_cmdline_args():
 		if arg.begins_with("--seed="):
 			game_seed = arg.split("=")[1].to_int()
-			print("使用固定种子: %d" % game_seed)
+			print("使用固定基础种子: %d" % game_seed)
+		elif arg.begins_with("--max-rounds="):
+			max_rounds = arg.split("=")[1].to_int()
+			print("最多验证局数: %d" % max_rounds)
+		elif arg.begins_with("--log-path="):
+			log_path_override = arg.split("=")[1]
 
 	_run_game_loop()
 
 	# Save log
-	var log_path := "user://game_log_%s.json" % Time.get_datetime_string_from_system().replace(":", "-")
-	var err := logger.save_to_file(log_path)
+	var log_path := log_path_override
+	if log_path == "":
+		log_path = "user://game_log_%s.json" % Time.get_datetime_string_from_system().replace(":", "-")
+	var err := logger.save_to_file(log_path, false)
 	if err == OK:
 		print("\n日志已保存: %s" % ProjectSettings.globalize_path(log_path))
 	else:
@@ -81,6 +90,10 @@ func _create_default_config() -> RuleConfig:
 func _run_game_loop() -> void:
 	var game_over := false
 	while not game_over:
+		if max_rounds > 0 and round_num >= max_rounds:
+			print("\n达到验证局数上限: %d" % max_rounds)
+			break
+
 		_sync_host_from_controller()
 		current_rank = team_ranks[current_dealer % 2]
 		rule_config.current_rank = current_rank
@@ -117,7 +130,7 @@ func _run_game_loop() -> void:
 
 func _play_one_round() -> UpgradeSettlement.SettlementResult:
 	round_num += 1
-	var round_seed := game_seed if game_seed >= 0 else randi()
+	var round_seed := game_seed + round_num - 1 if game_seed >= 0 else randi()
 
 	session_controller.state.team_ranks = team_ranks.duplicate()
 	session_controller.state.current_dealer = current_dealer

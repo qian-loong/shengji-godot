@@ -4,6 +4,7 @@ extends Control
 
 const SEAT_NAMES: Array[String] = ["你(南)", "AI-东", "搭档(北)", "AI-西"]
 # 逆时针座位顺序: 南(0/下) → 东(1/右) → 北(2/上) → 西(3/左)
+const UI_LOG_MAX_LINES: int = 300
 
 # ============================================================
 # UI nodes (created in _ready)
@@ -44,6 +45,7 @@ var trick_num: int = 0
 
 # Display state
 var table_cards: Dictionary = {}  # seat -> card string
+var ui_log_lines: Array[String] = []
 
 
 func _ready() -> void:
@@ -152,6 +154,10 @@ func _build_ui() -> void:
 # ============================================================
 
 func _start_new_game() -> void:
+	ui_log_lines = []
+	if log_label != null:
+		log_label.clear()
+
 	rule_config = RuleConfig.new()
 	rule_config.deck_count = 2
 	rule_config.current_rank = Card.Rank.TWO
@@ -616,9 +622,6 @@ func _resolve_trick() -> void:
 
 	_update_info()
 
-	# 每墩结束后自动保存
-	_auto_save_log()
-
 	if result["is_last"]:
 		_finish_round()
 	else:
@@ -706,7 +709,7 @@ func _sync_trick_host_from_controller() -> void:
 
 ## 自动保存（静默，覆盖同一文件，不打日志）
 func _auto_save_log() -> void:
-	logger.save_to_file(_resolve_log_path("game_log_latest.json"))
+	logger.save_to_file(_resolve_log_path("game_log_latest.json"), false)
 
 
 ## 手动保存（按钮触发，带时间戳，显示路径）
@@ -817,7 +820,10 @@ func _update_table() -> void:
 
 
 func _log(msg: String) -> void:
-	log_label.append_text(msg + "\n")
+	ui_log_lines.append(msg)
+	while ui_log_lines.size() > UI_LOG_MAX_LINES:
+		ui_log_lines.remove_at(0)
+	log_label.text = "\n".join(ui_log_lines) + "\n"
 	# Auto scroll to bottom
 	await get_tree().process_frame
 	scroll_container.scroll_vertical = int(log_label.size.y)
