@@ -10,6 +10,8 @@ var state: SessionState
 var game_round: GameRound
 var current_phase: String = "idle"
 var last_settlement: UpgradeSettlement.SettlementResult = null
+var bid_seat_index: int = 0
+var bidding_resolved: bool = false
 
 
 func _init(
@@ -61,6 +63,8 @@ func start_round(seed_value: int = -1) -> Dictionary:
 
 	game_round.deal(round_seed)
 	current_phase = "bidding"
+	bid_seat_index = 0
+	bidding_resolved = false
 	last_settlement = null
 
 	return _ok({
@@ -69,6 +73,110 @@ func start_round(seed_value: int = -1) -> Dictionary:
 		"seed": round_seed,
 		"current_rank": state.current_rank,
 		"current_dealer": state.current_dealer,
+	})
+
+
+func get_bidding_context(seat: int) -> Dictionary:
+	if game_round == null:
+		return _error("missing_game_round")
+	var hand := game_round.get_hand(seat)
+	var bid_rank := state.get_team_rank_for_seat(seat)
+	return _ok({
+		"phase": current_phase,
+		"seat": seat,
+		"hand": hand,
+		"bid_rank": bid_rank,
+		"available_bids": TrumpBidding.get_available_bids(seat, hand, bid_rank, rule_config),
+		"is_first_game": state.is_first_game,
+	})
+
+
+func get_current_bid_seat() -> int:
+	return (state.current_dealer + bid_seat_index) % 4
+
+
+func submit_bid_or_pass(
+	seat: int,
+	declaration: TrumpBidding.BidDeclaration = null,
+	pass_reason: String = "player_choice",
+) -> Dictionary:
+	if game_round == null:
+		return _error("missing_game_round")
+	if current_phase != "bidding":
+		return _error("not_bidding")
+	if game_round.bid_declaration != null:
+		_log_bid_skip(seat, "already_bid")
+		return finish_bidding_if_ready()
+
+	if declaration == null:
+		_log_bid_skip(seat, pass_reason)
+		return _ok({ "phase": current_phase, "bid_made": false })
+
+	if game_round.process_bid(declaration):
+		bidding_resolved = true
+		if logger:
+			logger.log_bid_attempt(seat, "bid", "", declaration.suit)
+		return finish_bidding_if_ready()
+
+	_log_bid_skip(seat, "bid_rejected")
+	return _error("bid_rejected")
+
+
+func resolve_no_bid_default() -> Dictionary:
+	if game_round == null:
+		return _error("missing_game_round")
+	if current_phase != "bidding":
+		return _error("not_bidding")
+	if game_round.bid_declaration == null:
+		game_round.set_no_bid_default(state.current_dealer)
+	bidding_resolved = true
+	return finish_bidding_if_ready()
+
+
+func finish_bidding_if_ready() -> Dictionary:
+	if game_round == null:
+		return _error("missing_game_round")
+	if not bidding_resolved:
+		return _ok({ "phase": current_phase, "bid_made": false })
+	sync_rank_to_actual_dealer()
+	current_phase = "burying"
+	return _ok({
+		"phase": current_phase,
+		"bid_made": game_round.bid_declaration != null,
+		"dealer": game_round.dealer_seat,
+		"trump_suit": game_round.trump_suit,
+		"current_rank": state.current_rank,
+	})
+
+
+func get_bury_context() -> Dictionary:
+	if game_round == null:
+		return _error("missing_game_round")
+	if current_phase != "burying":
+		return _error("not_burying")
+	return _ok({
+		"phase": current_phase,
+		"dealer": game_round.dealer_seat,
+		"merged_hand": game_round.get_dealer_hand_with_bottom(),
+		"bottom_size": rule_config.bottom_size,
+		"trump_suit": game_round.trump_suit,
+		"current_rank": state.current_rank,
+	})
+
+
+func submit_bury(indices: Array[int]) -> Dictionary:
+	if game_round == null:
+		return _error("missing_game_round")
+	if current_phase != "burying":
+		return _error("not_burying")
+	var result := game_round.execute_bury(indices)
+	if not result.get("ok", false):
+		return _error(str(result.get("error", "bury_failed")))
+	current_phase = "playing"
+	return _ok({
+		"phase": current_phase,
+		"dealer": game_round.dealer_seat,
+		"buried": result.get("buried", []),
 	})
 
 
@@ -81,6 +189,11 @@ func sync_rank_to_actual_dealer() -> int:
 	if logger:
 		logger.update_round_rank(rank, state.team_ranks)
 	return rank
+
+
+func _log_bid_skip(seat: int, reason: String) -> void:
+	if logger:
+		logger.log_bid_attempt(seat, "skip", reason)
 
 
 func finish_round() -> Dictionary:

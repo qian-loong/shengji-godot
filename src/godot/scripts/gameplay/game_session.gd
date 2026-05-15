@@ -6,6 +6,7 @@ extends SceneTree
 var rule_config: RuleConfig
 var game_round: GameRound
 var logger: GameLogger
+var session_controller: SessionController
 var human_seat: int = 0
 var current_dealer: int = 0
 var team_ranks: Array[int] = [Card.Rank.TWO, Card.Rank.TWO]  # [team_02, team_13]
@@ -23,6 +24,8 @@ func _init() -> void:
 	rule_config = _create_default_config()
 	logger = GameLogger.new(true)  # debug enabled
 	logger.set_rule_config(rule_config)
+	session_controller = SessionController.new()
+	session_controller.start_new_session(rule_config, logger, human_seat)
 
 	# Parse command line for seed
 	for arg: String in OS.get_cmdline_args():
@@ -146,15 +149,14 @@ func _play_one_round() -> UpgradeSettlement.SettlementResult:
 	round_num += 1
 	var round_seed := game_seed if game_seed >= 0 else randi()
 
-	game_round = GameRound.new()
-	game_round.setup(rule_config, current_dealer)
-	game_round.logger = logger
-
-	# Begin round logging
-	logger.begin_round(round_num, current_rank, current_dealer, round_seed, team_ranks)
-
-	# Phase 1: Deal
-	game_round.deal(round_seed)
+	session_controller.state.team_ranks = team_ranks.duplicate()
+	session_controller.state.current_dealer = current_dealer
+	session_controller.state.current_rank = current_rank
+	session_controller.state.round_num = round_num - 1
+	session_controller.state.is_first_game = is_first_game
+	session_controller.start_round(round_seed)
+	game_round = session_controller.game_round
+	round_num = session_controller.state.round_num
 	print("\n--- 发牌完成 ---")
 
 	# Phase 2: Bidding
@@ -184,12 +186,13 @@ func _bidding_phase() -> void:
 	# Each player gets a chance to bid (in seat order from dealer)
 	for i: int in range(4):
 		var seat := (current_dealer + i) % 4
-		var hand := game_round.get_hand(seat)
-		var bid_rank := _get_team_rank_for_seat(seat)
+		var context := session_controller.get_bidding_context(seat)
+		var hand: Array = context["hand"]
+		var bid_rank: int = context["bid_rank"]
 
 		if seat == human_seat:
 			# Human player
-			var bids := TrumpBidding.get_available_bids(seat, hand, bid_rank, rule_config)
+			var bids: Array = context["available_bids"]
 			if not bids.is_empty() and not bid_made:
 				print("\n你的手牌:")
 				_display_hand(hand, -1, bid_rank)
@@ -204,39 +207,40 @@ func _bidding_phase() -> void:
 				var choice := 1  # Default: pick first available
 				var declaration: TrumpBidding.BidDeclaration = bids[choice - 1]
 				print("→ 自动选择: %s" % ("公主" if declaration.suit < 0 else Card.suit_symbol(declaration.suit)))
-				if game_round.process_bid(declaration):
+				var bid_result := session_controller.submit_bid_or_pass(seat, declaration)
+				if bid_result["ok"]:
 					bid_made = true
 					print("  ✓ 亮主成功！")
-					logger.log_bid_attempt(seat, "bid", "", declaration.suit)
 			else:
-				logger.log_bid_attempt(seat, "skip", "no_valid_cards" if bids.is_empty() else "already_bid")
+				session_controller.submit_bid_or_pass(seat, null, "no_valid_cards" if bids.is_empty() else "already_bid")
 		else:
 			# AI player
 			if not bid_made:
-				var available_bids := TrumpBidding.get_available_bids(seat, hand, bid_rank, rule_config)
+				var available_bids: Array = context["available_bids"]
 				var declaration := AIPlayer.decide_bid(seat, hand, bid_rank, rule_config)
 				if declaration != null:
-					if game_round.process_bid(declaration):
+					var bid_result := session_controller.submit_bid_or_pass(seat, declaration)
+					if bid_result["ok"]:
 						bid_made = true
 						var suit_str := "公主(无主)" if declaration.suit < 0 else Card.suit_symbol(declaration.suit)
 						print("%s 亮主: %s" % [SEAT_NAMES[seat], suit_str])
-						logger.log_bid_attempt(seat, "bid", "", declaration.suit)
 					else:
-						logger.log_bid_attempt(seat, "skip", "bid_rejected")
+						session_controller.submit_bid_or_pass(seat, null, "bid_rejected")
 				else:
 					var reason := "no_valid_cards" if available_bids.is_empty() else "ai_pass"
-					logger.log_bid_attempt(seat, "skip", reason)
+					session_controller.submit_bid_or_pass(seat, null, reason)
 			else:
-				logger.log_bid_attempt(seat, "skip", "already_bid")
+				session_controller.submit_bid_or_pass(seat, null, "already_bid")
 
 		if bid_made and is_first_game:
 			break  # First game: first come first served
 
 	if not bid_made:
-		game_round.set_no_bid_default(current_dealer)
+		session_controller.resolve_no_bid_default()
 		print("无人亮主，默认 %s 为庄家，公主局" % SEAT_NAMES[current_dealer])
 
-	_sync_rank_to_actual_dealer()
+	current_rank = session_controller.state.current_rank
+	rule_config.current_rank = current_rank
 	var trump_str := "公主(无主)" if game_round.trump_suit < 0 else Card.suit_symbol(game_round.trump_suit)
 	print("\n主花色: %s | 庄家: %s" % [trump_str, SEAT_NAMES[game_round.dealer_seat]])
 
@@ -248,8 +252,9 @@ func _bidding_phase() -> void:
 func _bury_phase() -> void:
 	print("\n--- 配底阶段 ---")
 
-	var dealer := game_round.dealer_seat
-	var merged := game_round.get_dealer_hand_with_bottom()
+	var context := session_controller.get_bury_context()
+	var dealer: int = context["dealer"]
+	var merged: Array = context["merged_hand"]
 
 	if dealer == human_seat:
 		print("\n你的手牌（含底牌 %d 张）:" % rule_config.bottom_size)
@@ -260,12 +265,12 @@ func _bury_phase() -> void:
 		var indices := AIPlayer.decide_bury(merged, rule_config.bottom_size,
 			game_round.trump_suit, current_rank, rule_config)
 		print("→ 自动扣底: ", _cards_to_str(_get_cards_by_indices(merged, indices)))
-		game_round.execute_bury(indices)
+		session_controller.submit_bury(indices)
 	else:
 		# AI bury
 		var indices := AIPlayer.decide_bury(merged, rule_config.bottom_size,
 			game_round.trump_suit, current_rank, rule_config)
-		game_round.execute_bury(indices)
+		session_controller.submit_bury(indices)
 		print("%s 完成配底" % SEAT_NAMES[dealer])
 
 	print("配底完成，开始出牌\n")

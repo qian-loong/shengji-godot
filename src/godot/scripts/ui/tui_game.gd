@@ -21,6 +21,7 @@ var scroll_container: ScrollContainer
 var rule_config: RuleConfig
 var game_round: GameRound
 var logger: GameLogger
+var session_controller: SessionController
 
 var human_seat: int = 0
 var current_dealer: int = 0
@@ -161,12 +162,15 @@ func _start_new_game() -> void:
 
 	logger = GameLogger.new(true)
 	logger.set_rule_config(rule_config)
+	session_controller = SessionController.new()
+	session_controller.start_new_session(rule_config, logger, human_seat)
 	_auto_save_log()
 
 	team_ranks = [Card.Rank.TWO, Card.Rank.TWO]
 	current_dealer = 0
 	round_num = 0
 	is_first_game = true
+	_sync_controller_from_host_state()
 
 	_log("[color=yellow]═══ 双升对局 — TUI 版 ═══[/color]")
 	_start_round()
@@ -178,12 +182,11 @@ func _start_round() -> void:
 	rule_config.current_rank = current_rank
 	var round_seed := randi()
 
-	game_round = GameRound.new()
-	game_round.setup(rule_config, current_dealer)
-	game_round.logger = logger
-	logger.begin_round(round_num, current_rank, current_dealer, round_seed, team_ranks)
-
-	game_round.deal(round_seed)
+	# Controller owns round_num increment; host increments only for legacy display state.
+	round_num -= 1
+	_sync_controller_from_host_state()
+	session_controller.start_round(round_seed)
+	_sync_host_from_controller()
 
 	var trump_str := Card.rank_symbol(current_rank)
 	var dealer_team_name: String = ["南北队", "东西队"][current_dealer % 2] as String
@@ -203,17 +206,18 @@ func _start_round() -> void:
 
 func _start_bidding() -> void:
 	current_phase = "bidding"
+	session_controller.current_phase = "bidding"
 
 	if is_first_game:
 		_log("\n[color=green]— 亮主阶段（首局·先到先得）—[/color]")
 		# MVP简化：首局一次发完牌，先问人类再轮询AI
-		var human_bids := TrumpBidding.get_available_bids(human_seat,
-			game_round.get_hand(human_seat), current_rank, rule_config)
+		var context := session_controller.get_bidding_context(human_seat)
+		var human_bids: Array = context["available_bids"]
 		if not human_bids.is_empty():
 			_show_bid_options(human_bids)
 		else:
 			_log("你没有可亮的牌")
-			logger.log_bid_attempt(human_seat, "skip", "no_valid_cards")
+			session_controller.submit_bid_or_pass(human_seat, null, "no_valid_cards")
 			_finish_bidding_round()
 	else:
 		_log("\n[color=green]— 亮主阶段（从庄家开始轮询）—[/color]")
@@ -234,30 +238,30 @@ func _process_next_bidder() -> void:
 		return
 
 	var seat := (current_dealer + _bid_seat_index) % 4
-	var hand := game_round.get_hand(seat)
-	var bid_rank := _get_team_rank_for_seat(seat)
+	var context := session_controller.get_bidding_context(seat)
+	var hand: Array = context["hand"]
+	var bid_rank: int = context["bid_rank"]
 
 	if seat == human_seat:
-		var human_bids := TrumpBidding.get_available_bids(seat, hand, bid_rank, rule_config)
+		var human_bids: Array = context["available_bids"]
 		if not human_bids.is_empty():
 			_show_bid_options(human_bids)
 			return  # Wait for player input
 		else:
 			_log("你没有可亮的牌（跳过）")
-			logger.log_bid_attempt(seat, "skip", "no_valid_cards")
+			session_controller.submit_bid_or_pass(seat, null, "no_valid_cards")
 	else:
-		var available_bids := TrumpBidding.get_available_bids(seat, hand, bid_rank, rule_config)
+		var available_bids: Array = context["available_bids"]
 		var decl := AIPlayer.decide_bid(seat, hand, bid_rank, rule_config)
-		if decl != null and game_round.process_bid(decl):
+		var bid_result := session_controller.submit_bid_or_pass(seat, decl) if decl != null else session_controller.submit_bid_or_pass(seat, null, "no_valid_cards" if available_bids.is_empty() else "ai_pass")
+		if decl != null and bid_result["ok"] and session_controller.current_phase == "burying":
 			var s := "公主" if decl.suit < 0 else Card.suit_symbol(decl.suit)
 			_log("%s 亮主: %s" % [SEAT_NAMES[seat], s])
-			logger.log_bid_attempt(seat, "bid", "", decl.suit)
+			_sync_host_from_controller()
 			_finish_bidding()
 			return
 		else:
 			_log("%s 跳过" % SEAT_NAMES[seat])
-			var reason := "no_valid_cards" if available_bids.is_empty() else "ai_pass"
-			logger.log_bid_attempt(seat, "skip", reason)
 
 	_bid_seat_index += 1
 	_process_next_bidder()
@@ -272,29 +276,29 @@ func _finish_bidding_round() -> void:
 			var seat := (current_dealer + i) % 4
 			if seat == human_seat:
 				continue
-			var hand := game_round.get_hand(seat)
-			var bid_rank := _get_team_rank_for_seat(seat)
-			var available_bids := TrumpBidding.get_available_bids(seat, hand, bid_rank, rule_config)
+			var context := session_controller.get_bidding_context(seat)
+			var hand: Array = context["hand"]
+			var bid_rank: int = context["bid_rank"]
+			var available_bids: Array = context["available_bids"]
 			var decl := AIPlayer.decide_bid(seat, hand, bid_rank, rule_config)
-			if decl != null and game_round.process_bid(decl):
+			var bid_result := session_controller.submit_bid_or_pass(seat, decl) if decl != null else session_controller.submit_bid_or_pass(seat, null, "no_valid_cards" if available_bids.is_empty() else "ai_pass")
+			if decl != null and bid_result["ok"] and session_controller.current_phase == "burying":
 				bid_made = true
 				var s := "公主" if decl.suit < 0 else Card.suit_symbol(decl.suit)
 				_log("%s 亮主: %s" % [SEAT_NAMES[seat], s])
-				logger.log_bid_attempt(seat, "bid", "", decl.suit)
 				break
-			else:
-				var reason := "no_valid_cards" if available_bids.is_empty() else "ai_pass"
-				logger.log_bid_attempt(seat, "skip", reason)
 
 	if not bid_made:
-		game_round.set_no_bid_default(current_dealer)
+		session_controller.resolve_no_bid_default()
 		_log("无人亮主，默认 %s 为庄家，公主局" % SEAT_NAMES[current_dealer])
 
 	_finish_bidding()
 
 
 func _finish_bidding() -> void:
-	_sync_rank_to_actual_dealer()
+	if session_controller.current_phase == "bidding":
+		session_controller.finish_bidding_if_ready()
+	_sync_host_from_controller()
 	_log("主花色: %s | 庄家: %s" % [_trump_str(), SEAT_NAMES[game_round.dealer_seat]])
 	_update_info()
 	_start_bury()
@@ -322,10 +326,10 @@ func _on_bid_selected(bids: Array, index: int) -> void:
 		return
 	waiting_for_input = false
 	var decl: TrumpBidding.BidDeclaration = bids[index]
-	game_round.process_bid(decl)
+	session_controller.submit_bid_or_pass(human_seat, decl)
+	_sync_host_from_controller()
 	var s := "公主" if decl.suit < 0 else Card.suit_symbol(decl.suit)
 	_log("你亮主: %s" % s)
-	logger.log_bid_attempt(human_seat, "bid", "", decl.suit)
 	_clear_actions()
 	if is_first_game:
 		_finish_bidding_round()  # First game: no more bids after first one
@@ -338,7 +342,7 @@ func _on_bid_skip() -> void:
 		return
 	waiting_for_input = false
 	_log("你选择不亮")
-	logger.log_bid_attempt(human_seat, "skip", "player_choice")
+	session_controller.submit_bid_or_pass(human_seat, null, "player_choice")
 	_clear_actions()
 	if is_first_game:
 		_finish_bidding_round()  # Let AI try
@@ -353,20 +357,21 @@ func _on_bid_skip() -> void:
 
 func _start_bury() -> void:
 	current_phase = "burying"
-	var dealer := game_round.dealer_seat
+	var context := session_controller.get_bury_context()
+	var dealer: int = context["dealer"]
 
 	if dealer != human_seat:
 		# AI bury
-		var merged := game_round.get_dealer_hand_with_bottom()
+		var merged: Array = context["merged_hand"]
 		var indices := AIPlayer.decide_bury(merged, rule_config.bottom_size,
 			game_round.trump_suit, current_rank, rule_config)
-		game_round.execute_bury(indices)
+		session_controller.submit_bury(indices)
 		_log("%s 完成配底" % SEAT_NAMES[dealer])
 		_auto_save_log()
 		_start_play_phase()
 	else:
 		# Human bury
-		var merged := game_round.get_dealer_hand_with_bottom()
+		var merged: Array = context["merged_hand"]
 		_log("\n[color=green]— 配底阶段 —[/color] 选 %d 张扣底" % rule_config.bottom_size)
 		selected_indices = []
 		_refresh_hand_display_for_bury(merged)
@@ -437,7 +442,7 @@ func _on_bury_confirm() -> void:
 						used[i] = true
 						break
 
-	var result := game_round.execute_bury(actual_indices)
+	var result := session_controller.submit_bury(actual_indices)
 	if result["ok"]:
 		_log("配底完成")
 		_auto_save_log()
@@ -710,6 +715,28 @@ func _sync_rank_to_actual_dealer() -> void:
 	game_round.current_rank = current_rank
 	if logger:
 		logger.update_round_rank(current_rank, team_ranks)
+
+
+func _sync_controller_from_host_state() -> void:
+	if session_controller == null:
+		return
+	session_controller.state.team_ranks = team_ranks.duplicate()
+	session_controller.state.current_dealer = current_dealer
+	session_controller.state.current_rank = current_rank
+	session_controller.state.round_num = round_num
+	session_controller.state.is_first_game = is_first_game
+	session_controller.state.human_seat = human_seat
+
+
+func _sync_host_from_controller() -> void:
+	if session_controller == null:
+		return
+	game_round = session_controller.game_round
+	team_ranks = session_controller.state.team_ranks.duplicate()
+	current_dealer = session_controller.state.current_dealer
+	current_rank = session_controller.state.current_rank
+	round_num = session_controller.state.round_num
+	is_first_game = session_controller.state.is_first_game
 
 
 # ============================================================
