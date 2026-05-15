@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### 新增
+- 共享 `SessionState` / `SessionController`：自动宿主与 TUI 宿主共用同一套开局、亮主、配底、出牌、结算和跨局状态推进路径。
 - 两队独立级：南北队/东西队分别维护等级，每局按实际庄家队伍等级开局，攻方升级按攻方自身等级结算。
 - 日志复盘 HTML 导出器：支持每局切换、每墩围桌展示、初始手牌、出牌前后手牌、出牌高亮、庄家顺延原因和人工订正导出。
 - 日志复盘标准样例：新增 `docs/game-logs/standard_log.json` 作为分析器回归样例。
@@ -17,6 +18,7 @@
 - 修复攻方升级时错误使用庄家方等级作为升级基准的问题。
 
 ### 变更
+- `game_session.gd` 降级为自动宿主，`tui_game.gd` 降级为 UI 宿主；二者通过 controller 阶段 API 提交亮主、配底、出牌和结算。
 - 日志新增 `team_ranks`、`team_ranks_symbols`、每墩 `hands_after`，并将 `hands_before/hands_after` 统一为 TUI 展示顺序。
 - AI 定主跳过原因细分为 `no_valid_cards` 与 `ai_pass`，HTML 报告中明确展示庄家顺延原因。
 

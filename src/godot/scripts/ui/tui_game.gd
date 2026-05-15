@@ -607,17 +607,6 @@ func _on_play_confirm() -> void:
 	_process_next_player()
 
 
-func _set_lead_info(cards: Array) -> void:
-	var jat := rule_config.joker_always_trump
-	var pattern := CardPattern.identify(cards, current_rank,
-		rule_config.tractor_allow_rank_card, rule_config.four_same_is_tractor)
-	trick_lead_info = {
-		"domain": TrumpJudge.get_suit_domain(cards[0], game_round.trump_suit, current_rank, jat),
-		"count": cards.size(),
-		"pattern": pattern,
-	}
-
-
 func _resolve_trick() -> void:
 	var result := session_controller.last_trick_result
 	var winner_name := SEAT_NAMES[result["winner"]]
@@ -678,18 +667,6 @@ func _finish_round() -> void:
 		action_container.add_child(next_btn)
 		var save_btn := _make_button("保存日志", func() -> void: _save_log())
 		action_container.add_child(save_btn)
-
-
-func _get_team_rank_for_seat(seat: int) -> int:
-	return team_ranks[seat % 2]
-
-
-func _sync_rank_to_actual_dealer() -> void:
-	current_rank = _get_team_rank_for_seat(game_round.dealer_seat)
-	rule_config.current_rank = current_rank
-	game_round.current_rank = current_rank
-	if logger:
-		logger.update_round_rank(current_rank, team_ranks)
 
 
 func _sync_controller_from_host_state() -> void:
@@ -909,15 +886,6 @@ func _card_identity_key(card: Card) -> String:
 	if card.is_joker:
 		return "joker_%d" % card.joker_type
 	return "%d_%02d" % [card.suit, card.rank]
-
-
-func _make_game_state() -> Dictionary:
-	return {
-		"trump_suit": game_round.trump_suit,
-		"current_rank": current_rank,
-		"dealer_seat": game_round.dealer_seat,
-		"attack_score": game_round.score_tracker.get_attack_score(),
-	}
 
 
 # ============================================================

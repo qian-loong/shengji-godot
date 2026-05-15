@@ -356,15 +356,6 @@ func _get_cards_by_indices(cards: Array, indices: Array[int]) -> Array:
 	return result
 
 
-func _make_game_state() -> Dictionary:
-	return {
-		"trump_suit": game_round.trump_suit,
-		"current_rank": current_rank,
-		"dealer_seat": game_round.dealer_seat,
-		"attack_score": game_round.score_tracker.get_attack_score(),
-	}
-
-
 func _sync_host_from_controller() -> void:
 	if session_controller == null:
 		return

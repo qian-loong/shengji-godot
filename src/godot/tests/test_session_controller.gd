@@ -201,6 +201,46 @@ func test_submit_play_resolves_trick_after_four_valid_plays() -> void:
 	assert_eq(controller.game_round.get_hand_size(0), 0)
 
 
+func test_automatic_controller_path_finishes_round_and_updates_state() -> void:
+	controller.state.team_ranks = [R.TWO, R.THREE]
+	controller.state.current_dealer = 0
+	controller.start_round(77777)
+	controller.resolve_no_bid_default()
+	var bury_context := controller.get_bury_context()
+	var indices := AIPlayer.decide_bury(
+		bury_context["merged_hand"],
+		bury_context["bottom_size"],
+		bury_context["trump_suit"],
+		bury_context["current_rank"],
+		rc
+	)
+	controller.submit_bury(indices)
+
+	var safety := 0
+	while controller.game_round.get_hand_size(0) > 0 and safety < 40:
+		var started := controller.begin_trick()
+		assert_true(started["ok"])
+		for _i: int in range(4):
+			var turn := controller.get_current_turn_context()
+			var cards := AIPlayer.decide_play(
+				turn["seat"],
+				turn["hand"],
+				turn["lead_info"],
+				turn["game_state"],
+				rc
+			)
+			var submitted := controller.submit_play(turn["seat"], cards)
+			assert_true(submitted["ok"])
+		safety += 1
+
+	assert_lt(safety, 40)
+	var finished := controller.finish_round()
+	assert_true(finished["ok"])
+	assert_false(controller.state.is_first_game)
+	assert_true(controller.current_phase in ["round_end", "game_over"])
+	assert_eq(logger.get_log()["rounds"].size(), 1)
+
+
 func _force_round_ready_for_settlement(
 	round: GameRound,
 	dealer: int,
