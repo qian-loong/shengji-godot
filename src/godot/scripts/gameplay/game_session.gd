@@ -81,6 +81,7 @@ func _create_default_config() -> RuleConfig:
 func _run_game_loop() -> void:
 	var game_over := false
 	while not game_over:
+		_sync_host_from_controller()
 		current_rank = team_ranks[current_dealer % 2]
 		rule_config.current_rank = current_rank
 		print("\n====== 新局开始 | %s 打 %s 级 | 庄家: %s | %s:%s %s:%s ======" % [
@@ -94,51 +95,20 @@ func _run_game_loop() -> void:
 		# Display settlement
 		_display_settlement(settlement)
 
-		# Update state
-		var actual_dealer := game_round.dealer_seat
-		var upgrading_team := _get_upgrading_team(settlement, actual_dealer)
-		if settlement.upgrade_levels > 0:
-			team_ranks[upgrading_team] = settlement.new_rank
+		_sync_host_from_controller()
+		var upgrading_team := session_controller.state.winning_team
+		if upgrading_team < 0:
+			upgrading_team = SessionState.get_upgrading_team(settlement, game_round.dealer_seat)
 
 		if settlement.game_over:
 			print("\n🏆 游戏结束！%s 获胜！" % TEAM_NAMES[upgrading_team])
 			game_over = true
 		else:
-			# Update dealer
-			if settlement.new_dealer >= 0:
-				current_dealer = settlement.new_dealer
-				print("→ 新庄家: %s" % SEAT_NAMES[current_dealer])
-			else:
-				current_dealer = actual_dealer
-
+			print("→ 新庄家: %s" % SEAT_NAMES[current_dealer])
 			print("  %s: %s 级 | %s: %s 级" % [
 				TEAM_NAMES[0], Card.rank_symbol(team_ranks[0]),
 				TEAM_NAMES[1], Card.rank_symbol(team_ranks[1])])
 			print("\n按 Enter 继续下一局...")
-
-
-## Determine which team gets the upgrade
-static func _get_upgrading_team(settlement: UpgradeSettlement.SettlementResult, dealer: int) -> int:
-	if settlement.upgrading_side == 0:
-		return dealer % 2  # Dealer's team
-	else:
-		return (dealer + 1) % 2  # Attack team
-
-
-static func _get_attack_team(dealer: int) -> int:
-	return (dealer + 1) % 2
-
-
-func _get_team_rank_for_seat(seat: int) -> int:
-	return team_ranks[seat % 2]
-
-
-func _sync_rank_to_actual_dealer() -> void:
-	current_rank = _get_team_rank_for_seat(game_round.dealer_seat)
-	rule_config.current_rank = current_rank
-	game_round.current_rank = current_rank
-	if logger:
-		logger.update_round_rank(current_rank, team_ranks)
 
 
 # ============================================================
@@ -169,10 +139,9 @@ func _play_one_round() -> UpgradeSettlement.SettlementResult:
 	_play_phase()
 
 	# Phase 5: Settlement
-	var attack_rank := team_ranks[_get_attack_team(game_round.dealer_seat)]
-	var settlement := game_round.calculate_settlement(attack_rank)
-	logger.end_round()
-	return settlement
+	var finish := session_controller.finish_round()
+	_sync_host_from_controller()
+	return finish["settlement"]
 
 
 # ============================================================
@@ -394,3 +363,14 @@ func _make_game_state() -> Dictionary:
 		"dealer_seat": game_round.dealer_seat,
 		"attack_score": game_round.score_tracker.get_attack_score(),
 	}
+
+
+func _sync_host_from_controller() -> void:
+	if session_controller == null:
+		return
+	game_round = session_controller.game_round
+	team_ranks = session_controller.state.team_ranks.duplicate()
+	current_dealer = session_controller.state.current_dealer
+	current_rank = session_controller.state.current_rank
+	round_num = session_controller.state.round_num
+	is_first_game = session_controller.state.is_first_game

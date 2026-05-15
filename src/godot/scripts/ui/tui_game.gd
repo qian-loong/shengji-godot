@@ -232,7 +232,7 @@ func _process_next_bidder() -> void:
 		return
 	if _bid_seat_index >= 4:
 		# All 4 players checked, no one bid
-		game_round.set_no_bid_default(current_dealer)
+		session_controller.resolve_no_bid_default()
 		_log("无人亮主，默认 %s 为庄家，公主局" % SEAT_NAMES[current_dealer])
 		_finish_bidding()
 		return
@@ -638,9 +638,9 @@ func _resolve_trick() -> void:
 
 
 func _finish_round() -> void:
-	var attack_rank := team_ranks[_get_attack_team(game_round.dealer_seat)]
-	var settlement := game_round.calculate_settlement(attack_rank)
-	logger.end_round()
+	var finish := session_controller.finish_round()
+	var settlement: UpgradeSettlement.SettlementResult = finish["settlement"]
+	_sync_host_from_controller()
 
 	_log("\n[color=yellow]═══════ 结算 ═══════[/color]")
 	_log("出牌阶段攻方得分: %d" % settlement.attack_base_score)
@@ -650,7 +650,7 @@ func _finish_round() -> void:
 		_log("庄家方赢最后一墩，底牌不计分")
 	_log("最终得分: %d" % settlement.final_score)
 
-	var upgrading_team := _get_upgrading_team(settlement)
+	var upgrading_team := finish["upgrading_team"] as int
 	var team_names: Array[String] = ["南北队", "东西队"]
 	var team_name: String = team_names[upgrading_team]
 
@@ -661,12 +661,7 @@ func _finish_round() -> void:
 	else:
 		_log("庄家方守住")
 
-	# Update team rank
-	if settlement.upgrade_levels > 0:
-		team_ranks[upgrading_team] = settlement.new_rank
-
 	_auto_save_log()
-	is_first_game = false
 
 	if settlement.game_over:
 		_log("\n[color=yellow]🏆 游戏结束！%s 获胜！[/color]" % team_name)
@@ -675,11 +670,6 @@ func _finish_round() -> void:
 		var restart_btn := _make_button("再来一局", func() -> void: _start_new_game())
 		action_container.add_child(restart_btn)
 	else:
-		if settlement.new_dealer >= 0:
-			current_dealer = settlement.new_dealer
-		else:
-			current_dealer = game_round.dealer_seat
-
 		_log("  南北队: %s 级 | 东西队: %s 级" % [
 			Card.rank_symbol(team_ranks[0]), Card.rank_symbol(team_ranks[1])])
 
@@ -688,17 +678,6 @@ func _finish_round() -> void:
 		action_container.add_child(next_btn)
 		var save_btn := _make_button("保存日志", func() -> void: _save_log())
 		action_container.add_child(save_btn)
-
-
-func _get_upgrading_team(settlement: UpgradeSettlement.SettlementResult) -> int:
-	if settlement.upgrading_side == 0:
-		return game_round.dealer_seat % 2  # Dealer's team
-	else:
-		return _get_attack_team(game_round.dealer_seat)
-
-
-static func _get_attack_team(dealer: int) -> int:
-	return (dealer + 1) % 2
 
 
 func _get_team_rank_for_seat(seat: int) -> int:
