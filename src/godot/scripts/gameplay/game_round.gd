@@ -33,6 +33,13 @@ var logger: GameLogger = null
 var dealer_team: Array[int] = []
 var attack_team: Array[int] = []
 
+# Bury / counter-bid bookkeeping.
+# bury_seat indicates which seat is currently holding the bottom and must bury
+# (defaults to dealer_seat; switches to counter_seat after a successful counter).
+# counter_seat records the attacker who countered successfully (-1 if none).
+var bury_seat: int = 0
+var counter_seat: int = -1
+
 
 # ============================================================
 # Initialize round
@@ -43,6 +50,8 @@ func setup(rc: RuleConfig, p_dealer_seat: int) -> void:
 	current_rank = rc.current_rank
 	dealer_seat = p_dealer_seat
 	current_lead_seat = p_dealer_seat
+	bury_seat = p_dealer_seat
+	counter_seat = -1
 	score_tracker = ScoreTracker.new(rc.total_score)
 
 	# Set teams
@@ -86,6 +95,7 @@ func process_bid(declaration: TrumpBidding.BidDeclaration) -> bool:
 		if i not in dealer_team:
 			attack_team.append(i)
 	current_lead_seat = dealer_seat
+	bury_seat = dealer_seat
 	if logger:
 		logger.log_bid(declaration)
 		logger.log_trump_determined(trump_suit)
@@ -102,6 +112,7 @@ func set_no_bid_default(human_seat: int) -> void:
 		if i not in dealer_team:
 			attack_team.append(i)
 	current_lead_seat = dealer_seat
+	bury_seat = dealer_seat
 	# Force joker_always_trump for 公主
 	rule_config.joker_always_trump = true
 	if logger:
@@ -114,19 +125,46 @@ func set_no_bid_default(human_seat: int) -> void:
 # Phase 3: Bottom bury
 # ============================================================
 
+## Returns the merged hand of the current bury_seat (dealer or counter winner) plus the bottom.
+## Name kept as get_dealer_hand_with_bottom for caller compatibility; semantically it is
+## "current bury holder's hand + current bottom".
 func get_dealer_hand_with_bottom() -> Array:
-	return BottomManager.reveal_bottom(hands[dealer_seat], bottom)
+	return BottomManager.reveal_bottom(hands[bury_seat], bottom)
 
 
 func execute_bury(selected_indices: Array[int]) -> Dictionary:
 	var merged := get_dealer_hand_with_bottom()
 	var result := BottomManager.bury_bottom(merged, selected_indices, rule_config.bottom_size)
 	if result["ok"]:
-		hands[dealer_seat] = result["new_hand"]
+		hands[bury_seat] = result["new_hand"]
 		buried_bottom = result["buried"]
 		if logger:
-			logger.log_bury(merged, selected_indices, buried_bottom, hands[dealer_seat])
+			logger.log_bury(merged, selected_indices, buried_bottom, hands[bury_seat])
 	return result
+
+
+## Apply a successful counter-bid.
+## The original dealer keeps their 25-card hand untouched; the dealer's buried_bottom
+## is handed over to the counter winner as their new bottom, who then re-buries 8.
+## Dealer / teams / lead seat / current_rank all stay unchanged (D1 of counter-bid-plan).
+func apply_counter_bid(declaration: TrumpBidding.BidDeclaration) -> void:
+	var prev_trump := trump_suit
+	# Hand the previously-buried 8 cards over as the counter winner's new bottom.
+	bottom = buried_bottom.duplicate()
+	buried_bottom = []
+
+	bid_declaration = declaration
+	trump_suit = declaration.suit
+	counter_seat = declaration.seat_id
+	bury_seat = declaration.seat_id
+	# Intentionally do NOT touch dealer_seat / dealer_team / attack_team / current_lead_seat.
+
+	if logger:
+		logger.log_counter_bid(declaration, prev_trump)
+
+	# Invariants — bottom should be the standard size and buried_bottom must be empty.
+	assert(bottom.size() == rule_config.bottom_size)
+	assert(buried_bottom.is_empty())
 
 
 # ============================================================

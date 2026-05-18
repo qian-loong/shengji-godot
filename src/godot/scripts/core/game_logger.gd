@@ -159,6 +159,33 @@ func log_bury(merged_hand: Array, selected_indices: Array[int], buried_cards: Ar
 		_current_round["debug"]["buried_cards"] = _cards_to_strs(buried_cards)
 
 
+## Log a successful counter-bid event (dealer position is NOT changed; only trump_suit
+## and the bottom are replaced — see counter-bid-plan.md D1 / D3).
+func log_counter_bid(declaration, original_trump_suit: int) -> void:
+	var entry: Dictionary = {
+		"seat": declaration.seat_id,
+		"type": declaration.bid_type,
+		"suit": declaration.suit,
+		"suit_symbol": "公主" if declaration.suit < 0 else Card.suit_symbol(declaration.suit),
+		"original_trump_suit": original_trump_suit,
+		"original_trump_symbol": "公主" if original_trump_suit < 0 else Card.suit_symbol(original_trump_suit),
+	}
+	if not _current_round.has("counter_bid_history"):
+		_current_round["counter_bid_history"] = []
+	_current_round["counter_bid_history"].append(entry)
+	# Keep _current_round["bid"] reflecting the *current* effective trump bid.
+	_current_round["bid"] = {
+		"seat": declaration.seat_id,
+		"type": declaration.bid_type,
+		"suit": declaration.suit,
+		"suit_symbol": "公主" if declaration.suit < 0 else Card.suit_symbol(declaration.suit),
+		"countered_from_trump": original_trump_suit,
+	}
+	# trump_suit on the round metadata is updated; dealer / teams stay untouched.
+	_current_round["trump_suit"] = declaration.suit
+	_current_round["trump_suit_symbol"] = "公主" if declaration.suit < 0 else Card.suit_symbol(declaration.suit)
+
+
 # ============================================================
 # Trick-level logging
 # ============================================================
