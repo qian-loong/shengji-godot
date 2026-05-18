@@ -12,6 +12,10 @@ var human_seat: int = 0
 var game_over: bool = false
 var winning_team: int = -1
 
+# Per-round flag: whether the counter-bid window has already been opened/resolved
+# (success OR all attackers passed). Reset every round.
+var counter_attempted: bool = false
+
 
 func reset(p_human_seat: int = 0) -> void:
 	team_ranks = [Card.Rank.TWO, Card.Rank.TWO]
@@ -22,10 +26,12 @@ func reset(p_human_seat: int = 0) -> void:
 	human_seat = p_human_seat
 	game_over = false
 	winning_team = -1
+	counter_attempted = false
 
 
 func begin_round_for_current_dealer() -> int:
 	round_num += 1
+	counter_attempted = false
 	return sync_rank_to_dealer(current_dealer)
 
 

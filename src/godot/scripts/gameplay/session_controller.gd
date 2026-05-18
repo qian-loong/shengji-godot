@@ -19,6 +19,12 @@ var trick_seat_order: Array[int] = []
 var trick_lead_info: Dictionary = {}
 var last_trick_result: Dictionary = {}
 
+# Counter-bid window state.
+# counter_seat_order: attack-team seats polled in seat order (clockwise from dealer+1)
+# counter_seat_index: cursor inside counter_seat_order
+var counter_seat_index: int = 0
+var counter_seat_order: Array[int] = []
+
 
 func _init(
 	p_rule_config: RuleConfig = null,
@@ -72,6 +78,8 @@ func start_round(seed_value: int = -1) -> Dictionary:
 	bid_seat_index = 0
 	bidding_resolved = false
 	last_settlement = null
+	counter_seat_order = []
+	counter_seat_index = 0
 
 	return _ok({
 		"phase": current_phase,
@@ -163,6 +171,10 @@ func get_bury_context() -> Dictionary:
 	return _ok({
 		"phase": current_phase,
 		"dealer": game_round.dealer_seat,
+		# bury_seat == dealer for the original bury; == counter_seat after counter.
+		# Hosts that need to know "whose hand is being shown" should consume bury_seat.
+		"bury_seat": game_round.bury_seat,
+		"is_counter_re_bury": state.counter_attempted,
 		"merged_hand": game_round.get_dealer_hand_with_bottom(),
 		"bottom_size": rule_config.bottom_size,
 		"trump_suit": game_round.trump_suit,
@@ -178,13 +190,182 @@ func submit_bury(indices: Array[int]) -> Dictionary:
 	var result := game_round.execute_bury(indices)
 	if not result.get("ok", false):
 		return _error(str(result.get("error", "bury_failed")))
+
+	# Two paths share this method:
+	#   - Dealer's first bury (counter_attempted == false) -> may open counter window
+	#   - Counter winner's re-bury  (counter_attempted == true) -> straight to playing
+	if not state.counter_attempted:
+		return _open_counter_window_or_play(result.get("buried", []))
+
 	current_phase = "playing"
 	trick_num = 0
 	_reset_trick_state()
 	return _ok({
 		"phase": current_phase,
 		"dealer": game_round.dealer_seat,
+		"bury_seat": game_round.bury_seat,
 		"buried": result.get("buried", []),
+		"counter_seat": game_round.counter_seat,
+	})
+
+
+# ============================================================
+# Counter-bid window
+# ============================================================
+
+## Decide whether to open the counter window (only after dealer's first bury).
+## See counter-bid-plan.md §2 for the skip conditions.
+func _should_open_counter_window() -> bool:
+	if state.is_first_game:
+		return false
+	if game_round == null or game_round.bid_declaration == null:
+		return false
+	if not TrumpBidding.can_be_countered(game_round.bid_declaration):
+		return false
+	if state.counter_attempted:
+		return false
+	# At least one attack-team seat must be able to counter (i.e., own a stronger bid).
+	# To keep this method cheap and side-effect free we skip the per-hand check here;
+	# get_counter_context()/submit_counter_or_pass() will surface "no available counter"
+	# as natural pass. The window may open and immediately close in that case.
+	return true
+
+
+func _open_counter_window_or_play(buried: Array = []) -> Dictionary:
+	if _should_open_counter_window():
+		counter_seat_order = []
+		# Attack-team seats only, polled in clockwise order starting from dealer+1.
+		var dealer := game_round.dealer_seat
+		for offset: int in [1, 2, 3]:
+			var seat := (dealer + offset) % 4
+			if seat in game_round.attack_team:
+				counter_seat_order.append(seat)
+		counter_seat_index = 0
+		current_phase = "counter_window"
+		return _ok({
+			"phase": current_phase,
+			"dealer": dealer,
+			"buried": buried,
+			"counter_seat_order": counter_seat_order.duplicate(),
+		})
+
+	# No counter window: dealer's bury is final, jump straight to playing.
+	state.counter_attempted = true
+	current_phase = "playing"
+	trick_num = 0
+	_reset_trick_state()
+	return _ok({
+		"phase": current_phase,
+		"dealer": game_round.dealer_seat,
+		"bury_seat": game_round.bury_seat,
+		"buried": buried,
+		"counter_skipped": true,
+	})
+
+
+func get_current_counter_seat() -> int:
+	if counter_seat_order.is_empty():
+		return -1
+	if counter_seat_index >= counter_seat_order.size():
+		return -1
+	return counter_seat_order[counter_seat_index]
+
+
+## Returns counter-bid context for one attacker:
+## { seat, hand, current_bid, current_rank, available_counter_bids[], has_any: bool }
+func get_counter_context(seat: int) -> Dictionary:
+	if game_round == null:
+		return _error("missing_game_round")
+	if current_phase != "counter_window":
+		return _error("not_counter_window")
+	if seat != get_current_counter_seat():
+		return _error("wrong_counter_seat")
+
+	var hand := game_round.get_hand(seat)
+	var bid_rank := state.get_team_rank_for_seat(seat)
+	var available := TrumpBidding.get_available_bids(seat, hand, bid_rank, rule_config)
+	var stronger: Array = []
+	for b: TrumpBidding.BidDeclaration in available:
+		if TrumpBidding.is_stronger(b, game_round.bid_declaration):
+			stronger.append(b)
+	return _ok({
+		"phase": current_phase,
+		"seat": seat,
+		"hand": hand,
+		"current_bid": game_round.bid_declaration,
+		"current_rank": state.current_rank,
+		"available_counter_bids": stronger,
+		"has_any": not stronger.is_empty(),
+	})
+
+
+func submit_counter_or_pass(
+	seat: int,
+	declaration: TrumpBidding.BidDeclaration = null,
+	pass_reason: String = "player_choice",
+) -> Dictionary:
+	if game_round == null:
+		return _error("missing_game_round")
+	if current_phase != "counter_window":
+		return _error("not_counter_window")
+	if seat != get_current_counter_seat():
+		return _error("wrong_counter_seat")
+	if not (seat in game_round.attack_team):
+		return _error("not_attack_team")
+
+	if declaration == null:
+		# Pass — advance to next attacker, or close window if exhausted.
+		if logger:
+			logger.log_bid_attempt(seat, "counter_pass", pass_reason)
+		counter_seat_index += 1
+		if counter_seat_index >= counter_seat_order.size():
+			return _finish_counter_window_no_change()
+		return _ok({
+			"phase": current_phase,
+			"counter_made": false,
+			"next_seat": get_current_counter_seat(),
+		})
+
+	if declaration.seat_id != seat:
+		return _error("seat_mismatch")
+	if not TrumpBidding.is_stronger(declaration, game_round.bid_declaration):
+		if logger:
+			logger.log_bid_attempt(seat, "counter_rejected", "not_stronger")
+		return _error("counter_not_stronger")
+
+	return _apply_counter(declaration)
+
+
+func _apply_counter(declaration: TrumpBidding.BidDeclaration) -> Dictionary:
+	game_round.apply_counter_bid(declaration)
+	state.counter_attempted = true
+	# Counter winner now must re-bury — re-enter the burying phase.
+	current_phase = "burying"
+	counter_seat_order = []
+	counter_seat_index = 0
+	return _ok({
+		"phase": current_phase,
+		"counter_made": true,
+		"counter_seat": declaration.seat_id,
+		"trump_suit": game_round.trump_suit,
+		"dealer": game_round.dealer_seat,           # 不变
+		"current_lead_seat": game_round.current_lead_seat,  # 不变
+		"current_rank": state.current_rank,         # 不变
+	})
+
+
+func _finish_counter_window_no_change() -> Dictionary:
+	state.counter_attempted = true
+	counter_seat_order = []
+	counter_seat_index = 0
+	current_phase = "playing"
+	trick_num = 0
+	_reset_trick_state()
+	return _ok({
+		"phase": current_phase,
+		"counter_made": false,
+		"dealer": game_round.dealer_seat,
+		"trump_suit": game_round.trump_suit,
 	})
 
 
