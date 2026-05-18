@@ -233,29 +233,75 @@ func _bidding_phase() -> void:
 
 func _bury_phase() -> void:
 	print("\n--- 配底阶段 ---")
+	_run_one_bury_round("庄家")
 
-	var context := session_controller.get_bury_context()
-	var dealer: int = context["dealer"]
-	var merged: Array = context["merged_hand"]
-
-	if dealer == human_seat:
-		print("\n你的手牌（含底牌 %d 张）:" % rule_config.bottom_size)
-		_display_hand(merged, game_round.trump_suit, current_rank)
-		print("\n需要选 %d 张扣底" % rule_config.bottom_size)
-
-		# Auto-select for headless: use AI logic
-		var indices := AIPlayer.decide_bury(merged, rule_config.bottom_size,
-			game_round.trump_suit, current_rank, rule_config)
-		print("→ 自动扣底: ", _cards_to_str(_get_cards_by_indices(merged, indices)))
-		session_controller.submit_bury(indices)
-	else:
-		# AI bury
-		var indices := AIPlayer.decide_bury(merged, rule_config.bottom_size,
-			game_round.trump_suit, current_rank, rule_config)
-		session_controller.submit_bury(indices)
-		print("%s 完成配底" % SEAT_NAMES[dealer])
+	# After dealer's bury, the controller may have opened a counter window.
+	# Drain it (auto-pick AI / human via AIPlayer.decide_counter), then if a
+	# counter succeeded the controller is back in "burying" for the counter
+	# winner — run another bury round.
+	if session_controller.current_phase == "counter_window":
+		_counter_window_phase()
+	if session_controller.current_phase == "burying" and session_controller.state.counter_attempted:
+		print("\n--- 反主成功，反家重新配底 ---")
+		_run_one_bury_round("反家")
 
 	print("配底完成，开始出牌\n")
+
+
+## Run a single bury round (dealer or counter winner) using AI heuristics.
+## Works for any bury_seat — seat identity comes from get_bury_context().
+func _run_one_bury_round(label: String) -> void:
+	var context := session_controller.get_bury_context()
+	var bury_seat: int = context.get("bury_seat", context["dealer"])
+	var merged: Array = context["merged_hand"]
+	var trump_suit: int = context["trump_suit"]
+	var c_rank: int = context["current_rank"]
+
+	if bury_seat == human_seat:
+		print("\n你的手牌（含底牌 %d 张）:" % rule_config.bottom_size)
+		_display_hand(merged, trump_suit, c_rank)
+		print("\n需要选 %d 张扣底（%s）" % [rule_config.bottom_size, label])
+
+	var indices := AIPlayer.decide_bury(merged, rule_config.bottom_size,
+		trump_suit, c_rank, rule_config)
+	if bury_seat == human_seat:
+		print("→ 自动扣底: ", _cards_to_str(_get_cards_by_indices(merged, indices)))
+	else:
+		print("%s（%s）完成配底" % [SEAT_NAMES[bury_seat], label])
+	session_controller.submit_bury(indices)
+
+
+# ============================================================
+# Counter-bid window (non-first-game, non-公主)
+# ============================================================
+
+func _counter_window_phase() -> void:
+	print("\n--- 反主窗口 ---")
+	while session_controller.current_phase == "counter_window":
+		var seat := session_controller.get_current_counter_seat()
+		if seat < 0:
+			break
+		var ctx := session_controller.get_counter_context(seat)
+		if not ctx["ok"]:
+			print("反主上下文异常: %s" % ctx.get("error", "?"))
+			break
+		var hand: Array = ctx["hand"]
+		var current_bid: TrumpBidding.BidDeclaration = ctx["current_bid"]
+		var c_rank: int = ctx["current_rank"]
+
+		var decl := AIPlayer.decide_counter(seat, hand, c_rank, current_bid, rule_config)
+		if decl == null:
+			session_controller.submit_counter_or_pass(seat, null, "ai_pass")
+			print("  %s 不反主" % SEAT_NAMES[seat])
+		else:
+			var result := session_controller.submit_counter_or_pass(seat, decl)
+			if result["ok"] and result.get("counter_made", false):
+				var suit_str := "公主(无主)" if decl.suit < 0 else Card.suit_symbol(decl.suit)
+				print("  ★ %s 反主成功: %s" % [SEAT_NAMES[seat], suit_str])
+				current_rank = session_controller.state.current_rank  # invariant: unchanged
+				break
+			# Should not happen with decide_counter (which only returns stronger), but be defensive.
+			session_controller.submit_counter_or_pass(seat, null, "fallback_pass")
 
 
 # ============================================================
