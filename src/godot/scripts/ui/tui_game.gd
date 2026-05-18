@@ -261,8 +261,7 @@ func _process_next_bidder() -> void:
 		var decl := AIPlayer.decide_bid(seat, hand, bid_rank, rule_config)
 		var bid_result := session_controller.submit_bid_or_pass(seat, decl) if decl != null else session_controller.submit_bid_or_pass(seat, null, "no_valid_cards" if available_bids.is_empty() else "ai_pass")
 		if decl != null and bid_result["ok"] and session_controller.current_phase == "burying":
-			var s := "公主" if decl.suit < 0 else Card.suit_symbol(decl.suit)
-			_log("%s 亮主: %s" % [SEAT_NAMES[seat], s])
+			_log("%s 亮主: %s" % [SEAT_NAMES[seat], _bid_label(decl)])
 			_sync_host_from_controller()
 			_finish_bidding()
 			return
@@ -290,8 +289,7 @@ func _finish_bidding_round() -> void:
 			var bid_result := session_controller.submit_bid_or_pass(seat, decl) if decl != null else session_controller.submit_bid_or_pass(seat, null, "no_valid_cards" if available_bids.is_empty() else "ai_pass")
 			if decl != null and bid_result["ok"] and session_controller.current_phase == "burying":
 				bid_made = true
-				var s := "公主" if decl.suit < 0 else Card.suit_symbol(decl.suit)
-				_log("%s 亮主: %s" % [SEAT_NAMES[seat], s])
+				_log("%s 亮主: %s" % [SEAT_NAMES[seat], _bid_label(decl)])
 				break
 
 	if not bid_made:
@@ -318,8 +316,7 @@ func _show_bid_options(bids: Array) -> void:
 	_log("请选择亮主:")
 	for i: int in range(bids.size()):
 		var b: TrumpBidding.BidDeclaration = bids[i]
-		var s := "公主(无主)" if b.suit < 0 else Card.suit_symbol(b.suit)
-		var btn := _make_button(s, func() -> void: _on_bid_selected(bids, i))
+		var btn := _make_button(_bid_label(b), func() -> void: _on_bid_selected(bids, i))
 		action_container.add_child(btn)
 
 	var skip_btn := _make_button("不亮", func() -> void: _on_bid_skip())
@@ -334,8 +331,7 @@ func _on_bid_selected(bids: Array, index: int) -> void:
 	var decl: TrumpBidding.BidDeclaration = bids[index]
 	session_controller.submit_bid_or_pass(human_seat, decl)
 	_sync_host_from_controller()
-	var s := "公主" if decl.suit < 0 else Card.suit_symbol(decl.suit)
-	_log("你亮主: %s" % s)
+	_log("你亮主: %s" % _bid_label(decl))
 	_clear_actions()
 	if is_first_game:
 		_finish_bidding_round()  # First game: no more bids after first one
@@ -862,6 +858,11 @@ func _trump_str() -> String:
 	if game_round == null:
 		return "—"
 	return "公主" if game_round.trump_suit < 0 else Card.suit_symbol(game_round.trump_suit)
+
+
+## Thin alias to TrumpBidding.bid_label for local readability.
+func _bid_label(decl: TrumpBidding.BidDeclaration) -> String:
+	return TrumpBidding.bid_label(decl)
 
 
 func _cards_str(cards: Array) -> String:

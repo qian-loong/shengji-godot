@@ -181,14 +181,13 @@ func _bidding_phase() -> void:
 				print("\n可选亮主:")
 				for j: int in range(bids.size()):
 					var b: TrumpBidding.BidDeclaration = bids[j]
-					var suit_str := "公主(无主)" if b.suit < 0 else Card.suit_symbol(b.suit)
-					print("  %d. %s" % [j + 1, suit_str])
+					print("  %d. %s" % [j + 1, TrumpBidding.bid_label(b)])
 				print("  0. 不亮")
 
 				# Auto-pick for headless mode
 				var choice := 1  # Default: pick first available
 				var declaration: TrumpBidding.BidDeclaration = bids[choice - 1]
-				print("→ 自动选择: %s" % ("公主" if declaration.suit < 0 else Card.suit_symbol(declaration.suit)))
+				print("→ 自动选择: %s" % TrumpBidding.bid_label(declaration))
 				var bid_result := session_controller.submit_bid_or_pass(seat, declaration)
 				if bid_result["ok"]:
 					bid_made = true
@@ -204,8 +203,7 @@ func _bidding_phase() -> void:
 					var bid_result := session_controller.submit_bid_or_pass(seat, declaration)
 					if bid_result["ok"]:
 						bid_made = true
-						var suit_str := "公主(无主)" if declaration.suit < 0 else Card.suit_symbol(declaration.suit)
-						print("%s 亮主: %s" % [SEAT_NAMES[seat], suit_str])
+						print("%s 亮主: %s" % [SEAT_NAMES[seat], TrumpBidding.bid_label(declaration)])
 					else:
 						session_controller.submit_bid_or_pass(seat, null, "bid_rejected")
 				else:
@@ -294,10 +292,13 @@ func _counter_window_phase() -> void:
 			session_controller.submit_counter_or_pass(seat, null, "ai_pass")
 			print("  %s 不反主" % SEAT_NAMES[seat])
 		else:
+			# Capture original bid label *before* submit (apply_counter overwrites bid_declaration).
+			var original_label := TrumpBidding.bid_label(current_bid)
 			var result := session_controller.submit_counter_or_pass(seat, decl)
 			if result["ok"] and result.get("counter_made", false):
-				var suit_str := "公主(无主)" if decl.suit < 0 else Card.suit_symbol(decl.suit)
-				print("  ★ %s 反主成功: %s" % [SEAT_NAMES[seat], suit_str])
+				print("  ★ %s 反主成功: %s（原:%s）" % [
+					SEAT_NAMES[seat], TrumpBidding.bid_label(decl), original_label
+				])
 				current_rank = session_controller.state.current_rank  # invariant: unchanged
 				break
 			# Should not happen with decide_counter (which only returns stronger), but be defensive.

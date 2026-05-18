@@ -100,3 +100,28 @@ static func can_be_countered(bid: BidDeclaration) -> bool:
 
 static func _bid_strength(bid: BidDeclaration) -> int:
 	return bid.bid_type  # Enum values are ordered by strength
+
+
+# ============================================================
+# Display helpers (ADR-0001)
+# ============================================================
+
+## Human-readable label for a bid declaration covering all 5 tiers.
+##   PAIR_JOKER         → "公主(无主)"
+##   JOKER_PAIR_RANK    → "王+对 ♥"
+##   JOKER_SINGLE_RANK  → "王+单 ♥"
+##   PAIR_RANK          → "对 ♥"
+##   SINGLE_RANK        → "单 ♥"
+##   null / NONE        → "—"
+static func bid_label(decl: BidDeclaration) -> String:
+	if decl == null:
+		return "—"
+	if decl.bid_type == BidType.PAIR_JOKER or decl.suit < 0:
+		return "公主(无主)"
+	var suit_sym := Card.suit_symbol(decl.suit)
+	match decl.bid_type:
+		BidType.SINGLE_RANK: return "单 %s" % suit_sym
+		BidType.PAIR_RANK: return "对 %s" % suit_sym
+		BidType.JOKER_SINGLE_RANK: return "王+单 %s" % suit_sym
+		BidType.JOKER_PAIR_RANK: return "王+对 %s" % suit_sym
+		_: return suit_sym

@@ -460,6 +460,47 @@ func test_counter_re_bury_uses_dealer_buried_as_new_bottom() -> void:
 	assert_eq(controller.game_round.buried_bottom.size(), rc.bottom_size)
 
 
+# ============================================================
+# ADR-0001: counter-bid path with refined 5-tier strength
+# ============================================================
+
+func test_counter_joker_pair_rank_beats_joker_single_rank() -> void:
+	# ADR-0001 acceptance: dealer JOKER_SINGLE_RANK ♥ countered by JOKER_PAIR_RANK ♠.
+	# This was IMPOSSIBLE pre-ADR (both were strength 3); now JPR(4) > JSR(3).
+	_setup_at_burying(false, 0, TrumpBidding.BidType.JOKER_SINGLE_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+	assert_eq(controller.current_phase, "counter_window")
+
+	var counter_decl := TrumpBidding.BidDeclaration.new(
+		1, TrumpBidding.BidType.JOKER_PAIR_RANK, Card.Suit.SPADE
+	)
+	var result := controller.submit_counter_or_pass(1, counter_decl)
+	assert_true(result["ok"])
+	assert_true(result.get("counter_made", false))
+	assert_eq(controller.game_round.trump_suit, Card.Suit.SPADE)
+	assert_eq(controller.game_round.bid_declaration.bid_type,
+		TrumpBidding.BidType.JOKER_PAIR_RANK)
+	# D1 invariants still hold: dealer unchanged.
+	assert_eq(controller.game_round.dealer_seat, 0)
+
+
+func test_counter_rejected_same_tier_different_suit() -> void:
+	# AC14: JOKER_SINGLE_RANK ♥ vs JOKER_SINGLE_RANK ♠ — same strength, different suit.
+	# Per "strict greater than" rule, this must be rejected.
+	_setup_at_burying(false, 0, TrumpBidding.BidType.JOKER_SINGLE_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+
+	var counter_decl := TrumpBidding.BidDeclaration.new(
+		1, TrumpBidding.BidType.JOKER_SINGLE_RANK, Card.Suit.SPADE
+	)
+	var result := controller.submit_counter_or_pass(1, counter_decl)
+	assert_false(result["ok"])
+	assert_eq(result["error"], "counter_not_stronger")
+	# Trump suit unchanged — reject is non-mutating.
+	assert_eq(controller.game_round.trump_suit, Card.Suit.HEART)
+	assert_eq(controller.current_phase, "counter_window")
+
+
 func _force_round_ready_for_settlement(
 	round: GameRound,
 	dealer: int,

@@ -19,10 +19,26 @@ var _debug_enabled: bool
 func _init(debug: bool = true) -> void:
 	_debug_enabled = debug
 	_game_log = {
-		"version": 1,
+		# Schema version. v2 = ADR-0001 5-tier BidType:
+		#   1=SINGLE_RANK 2=PAIR_RANK 3=JOKER_SINGLE_RANK 4=JOKER_PAIR_RANK 5=PAIR_JOKER
+		# v1 (deprecated) had 4=PAIR_JOKER, 3=JOKER_RANK without pair-rank tier.
+		"version": 2,
 		"created_at": Time.get_datetime_string_from_system(),
 		"rounds": [],
 	}
+
+
+## Map BidType enum to a stable human-readable name for log readability.
+## Keep names ASCII; downstream tools may rely on them.
+static func bid_type_name(bid_type: int) -> String:
+	match bid_type:
+		TrumpBidding.BidType.NONE: return "NONE"
+		TrumpBidding.BidType.SINGLE_RANK: return "SINGLE_RANK"
+		TrumpBidding.BidType.PAIR_RANK: return "PAIR_RANK"
+		TrumpBidding.BidType.JOKER_SINGLE_RANK: return "JOKER_SINGLE_RANK"
+		TrumpBidding.BidType.JOKER_PAIR_RANK: return "JOKER_PAIR_RANK"
+		TrumpBidding.BidType.PAIR_JOKER: return "PAIR_JOKER"
+		_: return "UNKNOWN(%d)" % bid_type
 
 
 # ============================================================
@@ -111,6 +127,7 @@ func log_bid(declaration, no_bid: bool = false) -> void:
 	_current_round["bid"] = {
 		"seat": declaration.seat_id,
 		"type": declaration.bid_type,
+		"type_name": bid_type_name(declaration.bid_type),
 		"suit": declaration.suit,
 		"suit_symbol": "公主" if declaration.suit < 0 else Card.suit_symbol(declaration.suit),
 	}
@@ -165,6 +182,7 @@ func log_counter_bid(declaration, original_trump_suit: int) -> void:
 	var entry: Dictionary = {
 		"seat": declaration.seat_id,
 		"type": declaration.bid_type,
+		"type_name": bid_type_name(declaration.bid_type),
 		"suit": declaration.suit,
 		"suit_symbol": "公主" if declaration.suit < 0 else Card.suit_symbol(declaration.suit),
 		"original_trump_suit": original_trump_suit,
@@ -177,6 +195,7 @@ func log_counter_bid(declaration, original_trump_suit: int) -> void:
 	_current_round["bid"] = {
 		"seat": declaration.seat_id,
 		"type": declaration.bid_type,
+		"type_name": bid_type_name(declaration.bid_type),
 		"suit": declaration.suit,
 		"suit_symbol": "公主" if declaration.suit < 0 else Card.suit_symbol(declaration.suit),
 		"countered_from_trump": original_trump_suit,
