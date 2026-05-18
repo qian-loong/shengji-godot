@@ -374,7 +374,7 @@ func _start_bury() -> void:
 		session_controller.submit_bury(indices)
 		_log("%s 完成配底" % SEAT_NAMES[dealer])
 		_auto_save_log()
-		_start_play_phase()
+		_after_bury_done()
 	else:
 		# Human bury
 		var merged: Array = context["merged_hand"]
@@ -453,9 +453,38 @@ func _on_bury_confirm() -> void:
 		_log("配底完成")
 		_auto_save_log()
 		selected_indices = []
-		_start_play_phase()
+		_after_bury_done()
 	else:
 		_log("[color=red]配底失败: %s[/color]" % result["error"])
+
+
+# ============================================================
+# Counter-bid window — TUI short-circuit (full UI deferred)
+# ============================================================
+
+## 配底完成后调用：若进入反主窗口，让所有反家自动 pass，
+## 然后进入出牌阶段。TUI 暂不暴露反主交互（后续单独 sprint）。
+func _after_bury_done() -> void:
+	_sync_host_from_controller()
+	if session_controller.current_phase == "counter_window":
+		_skip_counter_window_all_pass()
+	_start_play_phase()
+
+
+func _skip_counter_window_all_pass() -> void:
+	_log("[color=gray](反主窗口 — TUI 暂不支持，自动跳过)[/color]")
+	# 在窗口内循环让当前反家 pass；若意外触发反主，phase 会变成 "burying" 跳出循环。
+	var safety: int = 8
+	while session_controller.current_phase == "counter_window" and safety > 0:
+		var seat := session_controller.get_current_counter_seat()
+		if seat < 0:
+			break
+		var res := session_controller.submit_counter_or_pass(seat, null, "tui_short_circuit")
+		if not res.get("ok", false):
+			push_warning("TUI counter-window short-circuit failed: %s" % res.get("error", "?"))
+			break
+		safety -= 1
+	_sync_host_from_controller()
 
 
 # ============================================================
