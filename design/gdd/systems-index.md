@@ -1,6 +1,6 @@
 # 系统索引 — 双升对局
 
-> 版本：v0.4 | 最后更新：2026-05-18
+> 版本：v0.5 | 最后更新：2026-05-18
 
 ---
 
@@ -101,5 +101,6 @@
 | ADR | 标题 | 状态 | 日期 |
 |---|---|---|---|
 | [ADR-0001](../../docs/architecture/adr-0001-bid-strength-refinement.md) | 定主声明强度 5 档细分 | Accepted | 2026-05-18 |
+| [ADR-0002](../../docs/architecture/adr-0002-joker-pair-rank-counter-immunity.md) | 「王+对级」免疫公主反主 | Accepted | 2026-05-18 |
 
 运行 `/sprint-plan` 起 Sprint 3。

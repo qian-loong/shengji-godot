@@ -2,11 +2,33 @@
 
 ## Status
 
-Proposed
+Accepted (2026-05-18)
 
 ## Date
 
 2026-05-18
+
+## Implementation
+
+实施于 `feature/joker-pair-rank-immune` 分支：
+
+- J1：`trump_bidding.can_be_countered()` 加 `JOKER_PAIR_RANK` 分支；`SessionController._should_open_counter_window` 自动正确，零下游改动
+- J2：2 个新测试
+  - `test_joker_pair_rank_immune_to_counter`（unit）
+  - `test_counter_window_skipped_on_joker_pair_rank_bid`（含防御性 submit 测试）
+- J3：GDD `trump-bidding.md` §1 强度表"可被反主"列 JPR 改 ❌；§4 第 9 条扩展为同时覆盖 PJ + JPR；AC9 扩展；新增 AC19；Status 加 ADR-0002 标记
+
+50 局烟测（seed=42）反主分布对比：
+
+| 反主类型 | pre-ADR-0002 | post-ADR-0002 |
+|---|---:|---:|
+| `JOKER_PAIR_RANK` 反 `JOKER_SINGLE_RANK` | 4 | **4**（不变） |
+| `PAIR_JOKER` 反 `JOKER_SINGLE_RANK` | 3 | **3**（不变） |
+| `PAIR_JOKER` 反 `JOKER_PAIR_RANK` | 1 | **0**（被屏蔽，符合预期） |
+| 反主成功总次数 | 8 | 7 |
+| 反主窗口开启次数 | 23 | 22（JPR 局不再开窗口） |
+
+测试：184/184 全过；自动对局 exit 0、0 错误；窗口跳过路径在防御性 submit 时正确返回 `not_counter_window`。
 
 ## Context
 

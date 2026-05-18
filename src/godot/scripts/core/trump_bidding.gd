@@ -93,9 +93,19 @@ static func is_stronger(challenger: BidDeclaration, current: BidDeclaration) -> 
 	return _bid_strength(challenger) > _bid_strength(current)
 
 
-## Check if a bid can be countered
+## Check if a bid can be countered.
+## ADR-0002: PAIR_JOKER (公主) AND JOKER_PAIR_RANK (王+对) are both immune.
+##   - PAIR_JOKER: highest strength tier, no stronger bid exists by enum value.
+##   - JOKER_PAIR_RANK: only PAIR_JOKER would be strictly stronger; per ADR-0002
+##                     we shield it as well, making JPR a "counter-shield" so
+##                     that the dealer's 3-key-card investment can't be reversed
+##                     by attackers' 2-card pair-joker hand.
 static func can_be_countered(bid: BidDeclaration) -> bool:
-	return bid.bid_type != BidType.PAIR_JOKER
+	if bid.bid_type == BidType.PAIR_JOKER:
+		return false
+	if bid.bid_type == BidType.JOKER_PAIR_RANK:
+		return false
+	return true
 
 
 static func _bid_strength(bid: BidDeclaration) -> int:
