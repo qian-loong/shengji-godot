@@ -347,8 +347,8 @@ func test_counter_rejected_with_equal_strength() -> void:
 
 
 func test_counter_rejected_with_weaker_bid() -> void:
-	# Dealer JOKER_RANK (strength 3); attacker tries SINGLE_RANK (strength 1) — weaker.
-	_setup_at_burying(false, 0, TrumpBidding.BidType.JOKER_RANK, Card.Suit.HEART)
+	# Dealer JOKER_SINGLE_RANK (strength 3); attacker tries SINGLE_RANK (strength 1) — weaker.
+	_setup_at_burying(false, 0, TrumpBidding.BidType.JOKER_SINGLE_RANK, Card.Suit.HEART)
 	_dealer_burys_and_advance()
 
 	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.SPADE)
@@ -391,7 +391,7 @@ func test_counter_at_most_once_per_round() -> void:
 	assert_eq(controller.current_phase, "playing")
 	assert_true(controller.state.counter_attempted)
 
-	var second_decl := TrumpBidding.BidDeclaration.new(3, TrumpBidding.BidType.JOKER_RANK, Card.Suit.CLUB)
+	var second_decl := TrumpBidding.BidDeclaration.new(3, TrumpBidding.BidType.JOKER_SINGLE_RANK, Card.Suit.CLUB)
 	var second_result := controller.submit_counter_or_pass(3, second_decl)
 	assert_false(second_result["ok"])
 	assert_eq(second_result["error"], "not_counter_window")

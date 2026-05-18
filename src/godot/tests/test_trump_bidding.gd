@@ -67,9 +67,9 @@ func test_joker_rank_available() -> void:
 	var bids := TrumpBidding.get_available_bids(0, hand, R.FOUR, rc)
 	var has_joker_rank := false
 	for b: TrumpBidding.BidDeclaration in bids:
-		if b.bid_type == BT.JOKER_RANK:
+		if b.bid_type == BT.JOKER_SINGLE_RANK:
 			has_joker_rank = true
-	assert_true(has_joker_rank, "JokerRank should be available")
+	assert_true(has_joker_rank, "JokerSingleRank should be available")
 
 
 func test_pair_joker_available() -> void:
@@ -121,7 +121,7 @@ func test_color_match_red_joker_red_suit() -> void:
 	var bids := TrumpBidding.get_available_bids(0, hand, R.FOUR, rc)
 	var has_heart := false
 	for b: TrumpBidding.BidDeclaration in bids:
-		if b.bid_type == BT.JOKER_RANK and b.suit == S.HEART:
+		if b.bid_type == BT.JOKER_SINGLE_RANK and b.suit == S.HEART:
 			has_heart = true
 	assert_true(has_heart, "red joker + ♥ rank = valid")
 
@@ -137,7 +137,7 @@ func test_color_match_red_joker_black_suit_rejected() -> void:
 	var bids := TrumpBidding.get_available_bids(0, hand, R.FOUR, rc)
 	var has_spade := false
 	for b: TrumpBidding.BidDeclaration in bids:
-		if b.bid_type == BT.JOKER_RANK and b.suit == S.SPADE:
+		if b.bid_type == BT.JOKER_SINGLE_RANK and b.suit == S.SPADE:
 			has_spade = true
 	assert_false(has_spade, "red joker + ♠ rank = rejected (color mismatch)")
 
@@ -169,3 +169,103 @@ func test_no_bid_default_keeps_dealer_as_princess() -> void:
 	assert_eq(gr.trump_suit, -1, "公主局 = no trump")
 	assert_eq(gr.dealer_team, [2, 0] as Array[int], "dealer team = [2,0]")
 	assert_eq(gr.current_lead_seat, 2, "first lead = dealer")
+
+
+# ============================================================
+# ADR-0001: 5-tier bid strength refinement
+# ============================================================
+
+func test_strength_ladder_monotonic() -> void:
+	# Enum values must be strictly monotonic (NONE < SR < PR < JSR < JPR < PJ).
+	assert_lt(int(BT.NONE), int(BT.SINGLE_RANK), "NONE < SINGLE_RANK")
+	assert_lt(int(BT.SINGLE_RANK), int(BT.PAIR_RANK), "SINGLE_RANK < PAIR_RANK")
+	assert_lt(int(BT.PAIR_RANK), int(BT.JOKER_SINGLE_RANK), "PAIR_RANK < JOKER_SINGLE_RANK")
+	assert_lt(int(BT.JOKER_SINGLE_RANK), int(BT.JOKER_PAIR_RANK), "JOKER_SINGLE_RANK < JOKER_PAIR_RANK")
+	assert_lt(int(BT.JOKER_PAIR_RANK), int(BT.PAIR_JOKER), "JOKER_PAIR_RANK < PAIR_JOKER")
+
+
+func test_strength_joker_pair_rank_beats_joker_single_rank() -> void:
+	# ADR-0001: JOKER_PAIR_RANK can counter JOKER_SINGLE_RANK.
+	var jsr := TrumpBidding.BidDeclaration.new(0, BT.JOKER_SINGLE_RANK, S.HEART)
+	var jpr := TrumpBidding.BidDeclaration.new(1, BT.JOKER_PAIR_RANK, S.SPADE)
+	assert_true(TrumpBidding.is_stronger(jpr, jsr), "JOKER_PAIR_RANK > JOKER_SINGLE_RANK")
+	assert_false(TrumpBidding.is_stronger(jsr, jpr), "JOKER_SINGLE_RANK < JOKER_PAIR_RANK")
+
+
+func test_strength_same_tier_different_suit_not_stronger() -> void:
+	# AC14: same tier different suit must NOT be considered stronger (strict >).
+	var jsr_red := TrumpBidding.BidDeclaration.new(0, BT.JOKER_SINGLE_RANK, S.HEART)
+	var jsr_black := TrumpBidding.BidDeclaration.new(1, BT.JOKER_SINGLE_RANK, S.SPADE)
+	assert_false(TrumpBidding.is_stronger(jsr_red, jsr_black), "same tier different suit ≠ stronger")
+	assert_false(TrumpBidding.is_stronger(jsr_black, jsr_red), "same tier different suit ≠ stronger (rev)")
+
+
+func test_joker_pair_rank_available_same_suit() -> void:
+	# ADR-0001 AC: joker + 2 same-suit rank cards → JOKER_PAIR_RANK generated.
+	rc.bid_requires_joker = true
+	rc.trump_joker_color_match = true
+	var hand: Array = [
+		Card.joker(J.BIG),  # red joker
+		Card.normal(S.HEART, R.FOUR),
+		Card.normal(S.HEART, R.FOUR),  # 2nd deck duplicate
+	]
+	var bids := TrumpBidding.get_available_bids(0, hand, R.FOUR, rc)
+	var jpr_count := 0
+	var jsr_count := 0
+	for b: TrumpBidding.BidDeclaration in bids:
+		if b.bid_type == BT.JOKER_PAIR_RANK and b.suit == S.HEART:
+			jpr_count += 1
+		elif b.bid_type == BT.JOKER_SINGLE_RANK and b.suit == S.HEART:
+			jsr_count += 1
+	assert_eq(jpr_count, 1, "JOKER_PAIR_RANK ♥ generated exactly once")
+	assert_eq(jsr_count, 1, "JOKER_SINGLE_RANK ♥ also still generated (weaker fallback)")
+
+
+func test_joker_pair_rank_not_available_cross_suit() -> void:
+	# ADR-0001: joker + ♥4 + ♦4 (cross-suit) must NOT generate JOKER_PAIR_RANK.
+	# Per Decision: pair must be strictly same-suit (consistent with PAIR_RANK).
+	rc.bid_requires_joker = true
+	rc.trump_joker_color_match = true
+	var hand: Array = [
+		Card.joker(J.BIG),  # red joker
+		Card.normal(S.HEART, R.FOUR),
+		Card.normal(S.DIAMOND, R.FOUR),  # cross-suit, both red, both 4
+	]
+	var bids := TrumpBidding.get_available_bids(0, hand, R.FOUR, rc)
+	for b: TrumpBidding.BidDeclaration in bids:
+		assert_ne(b.bid_type, BT.JOKER_PAIR_RANK,
+			"cross-suit pair must not produce JOKER_PAIR_RANK (suit=%d)" % b.suit)
+
+
+func test_joker_pair_rank_color_match_constraint() -> void:
+	# ADR-0001: trump_joker_color_match still gates joker color even for JOKER_PAIR_RANK.
+	# Red joker + 2× ♠4 (black) must reject both JOKER_SINGLE_RANK and JOKER_PAIR_RANK on ♠.
+	rc.bid_requires_joker = true
+	rc.trump_joker_color_match = true
+	var hand: Array = [
+		Card.joker(J.BIG),  # red
+		Card.normal(S.SPADE, R.FOUR),
+		Card.normal(S.SPADE, R.FOUR),
+	]
+	var bids := TrumpBidding.get_available_bids(0, hand, R.FOUR, rc)
+	var spade_joker_bids := bids.filter(func(b: TrumpBidding.BidDeclaration) -> bool:
+		return (b.bid_type == BT.JOKER_PAIR_RANK or b.bid_type == BT.JOKER_SINGLE_RANK) and b.suit == S.SPADE
+	)
+	assert_eq(spade_joker_bids.size(), 0, "red joker + ♠ pair = rejected (color mismatch)")
+
+
+func test_joker_pair_rank_color_match_disabled_allows_cross_color() -> void:
+	# trump_joker_color_match=false → red joker can pair black rank.
+	rc.bid_requires_joker = true
+	rc.trump_joker_color_match = false
+	var hand: Array = [
+		Card.joker(J.BIG),  # red
+		Card.normal(S.SPADE, R.FOUR),
+		Card.normal(S.SPADE, R.FOUR),
+	]
+	var bids := TrumpBidding.get_available_bids(0, hand, R.FOUR, rc)
+	var has_jpr_spade := false
+	for b: TrumpBidding.BidDeclaration in bids:
+		if b.bid_type == BT.JOKER_PAIR_RANK and b.suit == S.SPADE:
+			has_jpr_spade = true
+	assert_true(has_jpr_spade, "no color-match → JOKER_PAIR_RANK ♠ generated")

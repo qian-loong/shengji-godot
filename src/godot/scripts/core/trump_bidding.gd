@@ -8,12 +8,16 @@ extends RefCounted
 # Bid types
 # ============================================================
 
+## Bid types — 5 tiers, enum value = strength (see ADR-0001)
+##   bid_requires_joker=false : SINGLE_RANK(1) < PAIR_RANK(2) < PAIR_JOKER(5)
+##   bid_requires_joker=true  : JOKER_SINGLE_RANK(3) < JOKER_PAIR_RANK(4) < PAIR_JOKER(5)
 enum BidType {
 	NONE = 0,
-	SINGLE_RANK = 1,    # Single rank card (bid_requires_joker=false only)
-	PAIR_RANK = 2,       # Pair of rank cards (bid_requires_joker=false only)
-	JOKER_RANK = 3,      # Joker + rank card (bid_requires_joker=true)
-	PAIR_JOKER = 4,      # Pair of same jokers (公主, cannot be countered)
+	SINGLE_RANK = 1,         # 1 rank card (mode A only)
+	PAIR_RANK = 2,           # 2 same-suit rank cards (mode A only)
+	JOKER_SINGLE_RANK = 3,   # joker + 1 rank card (mode B only)
+	JOKER_PAIR_RANK = 4,     # joker + 2 same-suit rank cards (mode B only)
+	PAIR_JOKER = 5,          # 2 same jokers (公主, highest, cannot be countered)
 }
 
 
@@ -53,7 +57,8 @@ static func get_available_bids(seat_id: int, hand: Array, current_rank: int, rul
 			break  # Only one 公主 bid possible
 
 	if rule_config.bid_requires_joker:
-		# JokerRank: need joker + rank card of matching color suit
+		# JokerSingleRank / JokerPairRank: joker + 1 or 2 same-suit rank cards
+		# trump_joker_color_match (if true) constrains joker color to match the suit color.
 		for suit: int in rank_per_suit:
 			var suit_color := Card.suit_color(suit)
 			var has_matching_joker := false
@@ -64,7 +69,10 @@ static func get_available_bids(seat_id: int, hand: Array, current_rank: int, rul
 						has_matching_joker = true
 						break
 			if has_matching_joker:
-				bids.append(BidDeclaration.new(seat_id, BidType.JOKER_RANK, suit))
+				var rank_count: int = rank_per_suit[suit]
+				bids.append(BidDeclaration.new(seat_id, BidType.JOKER_SINGLE_RANK, suit))
+				if rank_count >= 2:
+					bids.append(BidDeclaration.new(seat_id, BidType.JOKER_PAIR_RANK, suit))
 	else:
 		# SingleRank / PairRank
 		for suit: int in rank_per_suit:
