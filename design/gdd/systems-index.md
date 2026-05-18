@@ -1,6 +1,6 @@
 # 系统索引 — 双升对局
 
-> 版本：v0.2 | 最后更新：2026-05-17
+> 版本：v0.3 | 最后更新：2026-05-18
 
 ---
 
@@ -10,7 +10,7 @@
 |------|------|
 | 系统总数 | 23 |
 | 已完成设计 | 16 |
-| 已实现（代码） | 10 完整 + 1 部分（C3 缺反主） |
+| 已实现（代码） | 11 完整（C3 反主于 2026-05-18 补齐） |
 | TUI 替代（M1 表现层） | 5（P1–P5；图形 UI 待实现） |
 | 未开始（设计） | 7 |
 
@@ -25,7 +25,7 @@
 | 3 | F2 | 牌组管理 | Foundation | M0 | MVP | ✅ | ✅ 已实现 | `design/gdd/deck-management.md` |
 | 4 | C1 | 主副牌判定 | Core | M0 | MVP | ✅ | ✅ 已实现 | `design/gdd/trump-determination.md` |
 | 5 | C2 | 出牌合法性校验 | Core | M0 | MVP | ✅ | ✅ 已实现 | `design/gdd/play-validation.md` |
-| 6 | C3 | 亮主/抢主/反主 | Core | M1 | MVP | ✅ | 🚧 部分（反主未完成） | `design/gdd/trump-bidding.md` |
+| 6 | C3 | 亮主/抢主/反主 | Core | M1 | MVP | ✅ | ✅ | `design/gdd/trump-bidding.md` |
 | 7 | C4 | 抠底/配底 | Core | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/bottom-cards.md` |
 | 8 | C5 | 分值追踪 | Core | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/score-tracking.md` |
 | 9 | C6 | 升级结算 | Core | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/upgrade-settlement.md` |
@@ -92,7 +92,7 @@
 
 按当前代码状态（Sprint 1/2 已完成，v0.4.0 发布），下一步聚焦：
 
-1. **C3 反主流程（CounterWindow）实现** — 收掉 sprint-002 S2-03 与 `session-controller-refactor-plan.md` 中的 TODO
+1. ~~**C3 反主流程（CounterWindow）实现**~~ — ✅ 2026-05-18 在 `feature/counter-bid` 完成（详见 `production/sprints/counter-bid-plan.md` v2）
 2. **M1 表现层 P1 → P2 → P3 → P4 → P5** — 把 TUI 替换为正式图形 UI
 
 运行 `/sprint-plan` 起 Sprint 3。
