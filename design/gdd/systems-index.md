@@ -1,6 +1,6 @@
 # 系统索引 — 双升对局
 
-> 版本：v0.3 | 最后更新：2026-05-18
+> 版本：v0.4 | 最后更新：2026-05-18
 
 ---
 
@@ -93,6 +93,13 @@
 按当前代码状态（Sprint 1/2 已完成，v0.4.0 发布），下一步聚焦：
 
 1. ~~**C3 反主流程（CounterWindow）实现**~~ — ✅ 2026-05-18 在 `feature/counter-bid` 完成（详见 `production/sprints/counter-bid-plan.md` v2）
-2. **M1 表现层 P1 → P2 → P3 → P4 → P5** — 把 TUI 替换为正式图形 UI
+2. ~~**C3 定主声明强度 5 档细分**~~ — ✅ 2026-05-18 在 `feature/bid-strength-refinement` 完成（详见 [ADR-0001](../../docs/architecture/adr-0001-bid-strength-refinement.md)）
+3. **M1 表现层 P1 → P2 → P3 → P4 → P5** — 把 TUI 替换为正式图形 UI
+
+## 决策记录
+
+| ADR | 标题 | 状态 | 日期 |
+|---|---|---|---|
+| [ADR-0001](../../docs/architecture/adr-0001-bid-strength-refinement.md) | 定主声明强度 5 档细分 | Accepted | 2026-05-18 |
 
 运行 `/sprint-plan` 起 Sprint 3。

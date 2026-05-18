@@ -2,11 +2,29 @@
 
 ## Status
 
-Proposed
+Accepted (2026-05-18)
 
 ## Date
 
 2026-05-18
+
+## Implementation
+
+实施于 `feature/bid-strength-refinement` 分支（commit `9468300` + `e5790a9`）：
+
+- B1+B2：`trump_bidding.gd` 5 档枚举重排 + `get_available_bids` JOKER_PAIR_RANK 分支；新增 7 个测试覆盖 strength 单调性、JPR vs JSR、同档不同花色、JPR 同花色生成 / 跨花色拒绝 / color_match 约束
+- B3：`game_logger.gd` schema_version 升 2，新增 `bid_type_name()` 静态映射，`log_bid` / `log_counter_bid` 加 `type_name` 字段
+- B4：发现 `decide_bid` 已用「取最强候选」策略，无需改动
+- B5：`TrumpBidding.bid_label()` 新增静态显示函数，TUI / 自动模式共用；自动模式反主 print 增加"原 X"对比
+- B6：`test_session_controller` 新增 2 测试覆盖 JPR vs JSR 反主成功 / 同档不同花色反主拒绝
+- B8：GDD `trump-bidding.md` §1 重写为 5 档总表 + 两条互斥阶梯说明；新增 AC16/AC17/AC18
+
+50 局烟测（seed=42）反主分布从 1 种类型扩展到 3 种：
+- `JOKER_PAIR_RANK` 反 `JOKER_SINGLE_RANK`：4 次（**新增路径**）
+- `PAIR_JOKER` 反 `JOKER_SINGLE_RANK`：3 次
+- `PAIR_JOKER` 反 `JOKER_PAIR_RANK`：1 次（**新增路径**）
+
+测试：182/182 全过；自动对局 exit 0、0 错误。
 
 ## Context
 
