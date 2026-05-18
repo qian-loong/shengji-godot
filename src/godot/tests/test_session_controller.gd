@@ -241,6 +241,225 @@ func test_automatic_controller_path_finishes_round_and_updates_state() -> void:
 	assert_eq(logger.get_log()["rounds"].size(), 1)
 
 
+# ============================================================
+# Counter-bid tests (counter-bid-plan.md §5 step 3)
+# Covers GDD §4 reverse-bid: counter window, eligibility, strength,
+# at-most-once, dealer-position invariance, re-bury bottom transfer.
+# ============================================================
+
+
+## Drive controller into "burying" phase with a chosen dealer + bid (first
+## bury, before any counter). Bypasses real hand validation by injecting bid
+## directly via process_bid, which doesn't check seat ownership.
+func _setup_at_burying(
+	is_first_game: bool,
+	dealer_seat: int,
+	bid_type: int,
+	bid_suit: int,
+	seed_value: int = 99999,
+) -> void:
+	controller.state.is_first_game = is_first_game
+	controller.state.current_dealer = dealer_seat
+	controller.start_round(seed_value)
+	if bid_type == TrumpBidding.BidType.NONE:
+		controller.resolve_no_bid_default()
+	else:
+		var decl := TrumpBidding.BidDeclaration.new(dealer_seat, bid_type, bid_suit)
+		controller.submit_bid_or_pass(dealer_seat, decl)
+	assert_eq(controller.current_phase, "burying")
+
+
+func _dealer_burys_and_advance() -> Array:
+	var ctx := controller.get_bury_context()
+	var indices := AIPlayer.decide_bury(
+		ctx["merged_hand"],
+		ctx["bottom_size"],
+		ctx["trump_suit"],
+		ctx["current_rank"],
+		rc
+	)
+	controller.submit_bury(indices)
+	return indices
+
+
+func test_counter_window_skipped_on_first_game() -> void:
+	_setup_at_burying(true, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+
+	assert_eq(controller.current_phase, "playing")
+	assert_true(controller.state.counter_attempted)
+
+
+func test_counter_window_skipped_on_pair_joker_bid() -> void:
+	# Non-first-game; dealer plays 公主 (PAIR_JOKER, suit = -1) — cannot be countered.
+	_setup_at_burying(false, 0, TrumpBidding.BidType.PAIR_JOKER, -1)
+	_dealer_burys_and_advance()
+
+	assert_eq(controller.current_phase, "playing")
+	assert_true(controller.state.counter_attempted)
+
+
+func test_counter_window_skipped_on_no_bid() -> void:
+	# Non-first-game with 公主局（no bid declared）— cannot be countered.
+	_setup_at_burying(false, 0, TrumpBidding.BidType.NONE, -1)
+	_dealer_burys_and_advance()
+
+	assert_eq(controller.current_phase, "playing")
+	assert_true(controller.state.counter_attempted)
+
+
+func test_counter_succeeds_with_stronger_bid() -> void:
+	# Non-first-game; dealer 0 (team 0,2) bids SINGLE_RANK ♥; attacker 1 counters with PAIR_RANK ♠.
+	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+
+	assert_eq(controller.current_phase, "counter_window")
+	assert_eq(controller.get_current_counter_seat(), 1)
+
+	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE)
+	var result := controller.submit_counter_or_pass(1, counter_decl)
+
+	assert_true(result["ok"])
+	assert_true(result["counter_made"])
+	assert_eq(result["counter_seat"], 1)
+	assert_eq(controller.current_phase, "burying")
+	assert_true(controller.state.counter_attempted)
+	# Trump replaced; dealer position invariants preserved.
+	assert_eq(controller.game_round.trump_suit, Card.Suit.SPADE)
+	assert_eq(controller.game_round.dealer_seat, 0)
+	assert_eq(controller.game_round.current_lead_seat, 0)
+	assert_eq(controller.game_round.bury_seat, 1)
+	assert_eq(controller.game_round.counter_seat, 1)
+
+
+func test_counter_rejected_with_equal_strength() -> void:
+	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+
+	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.SPADE)
+	var result := controller.submit_counter_or_pass(1, counter_decl)
+
+	assert_false(result["ok"])
+	assert_eq(result["error"], "counter_not_stronger")
+	# Window stays open; no state change.
+	assert_eq(controller.current_phase, "counter_window")
+	assert_eq(controller.game_round.trump_suit, Card.Suit.HEART)
+
+
+func test_counter_rejected_with_weaker_bid() -> void:
+	# Dealer JOKER_RANK (strength 3); attacker tries SINGLE_RANK (strength 1) — weaker.
+	_setup_at_burying(false, 0, TrumpBidding.BidType.JOKER_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+
+	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.SPADE)
+	var result := controller.submit_counter_or_pass(1, counter_decl)
+
+	assert_false(result["ok"])
+	assert_eq(result["error"], "counter_not_stronger")
+
+
+func test_counter_rejected_from_dealer_team() -> void:
+	# Dealer 0 → dealer_team = {0, 2}; attack_team = {1, 3}.
+	# counter_seat_order should never include dealer-team seats.
+	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+
+	assert_eq(controller.current_phase, "counter_window")
+	assert_eq(controller.counter_seat_order, [1, 3])
+	assert_false(0 in controller.counter_seat_order)
+	assert_false(2 in controller.counter_seat_order)
+
+	# Manually attempting to counter from dealer-team seat 2 is rejected as
+	# wrong_counter_seat (current poll cursor points at 1).
+	var bad_decl := TrumpBidding.BidDeclaration.new(2, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE)
+	var result := controller.submit_counter_or_pass(2, bad_decl)
+	assert_false(result["ok"])
+	assert_eq(result["error"], "wrong_counter_seat")
+
+
+func test_counter_at_most_once_per_round() -> void:
+	# After a successful counter + reburial, phase becomes "playing"; submitting
+	# another counter is rejected with not_counter_window (no second window opens).
+	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+
+	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE)
+	controller.submit_counter_or_pass(1, counter_decl)
+	# Counter winner re-buries.
+	_dealer_burys_and_advance()
+
+	assert_eq(controller.current_phase, "playing")
+	assert_true(controller.state.counter_attempted)
+
+	var second_decl := TrumpBidding.BidDeclaration.new(3, TrumpBidding.BidType.JOKER_RANK, Card.Suit.CLUB)
+	var second_result := controller.submit_counter_or_pass(3, second_decl)
+	assert_false(second_result["ok"])
+	assert_eq(second_result["error"], "not_counter_window")
+
+
+func test_counter_preserves_dealer_lead_rank() -> void:
+	# D1 invariants: dealer_seat / dealer_team / attack_team / current_lead_seat
+	# / current_rank all unchanged after a successful counter.
+	controller.state.team_ranks = [Card.Rank.EIGHT, Card.Rank.FIVE]
+	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+
+	var dealer_before: int = controller.game_round.dealer_seat
+	var lead_before: int = controller.game_round.current_lead_seat
+	var rank_before: int = controller.state.current_rank
+	var dealer_team_before: Array = controller.game_round.dealer_team.duplicate()
+	var attack_team_before: Array = controller.game_round.attack_team.duplicate()
+
+	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE)
+	controller.submit_counter_or_pass(1, counter_decl)
+
+	assert_eq(controller.game_round.dealer_seat, dealer_before)
+	assert_eq(controller.game_round.current_lead_seat, lead_before)
+	assert_eq(controller.state.current_rank, rank_before)
+	assert_eq(controller.game_round.dealer_team, dealer_team_before)
+	assert_eq(controller.game_round.attack_team, attack_team_before)
+
+
+func test_counter_re_bury_uses_dealer_buried_as_new_bottom() -> void:
+	# After successful counter:
+	#   - bottom = the 8 cards dealer had buried (handed off)
+	#   - buried_bottom = []
+	#   - dealer hand size = 25 (unchanged)
+	#   - counter winner hand size = 25 (unchanged)
+	#   - bury_seat = counter winner
+	# After counter winner buries 8:
+	#   - buried_bottom.size() = 8
+	#   - counter winner hand size = 25
+	#   - dealer hand size still = 25
+	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
+	var dealer_buried: Array = _dealer_burys_and_advance()  # noqa: unused
+	dealer_buried = dealer_buried  # silence unused
+	var dealer_hand_after_bury: int = controller.game_round.get_hand_size(0)
+	var attacker_hand_at_window: int = controller.game_round.get_hand_size(1)
+	var dealer_buried_bottom_snapshot: Array = controller.game_round.buried_bottom.duplicate()
+
+	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE)
+	controller.submit_counter_or_pass(1, counter_decl)
+
+	# Right after counter applied: dealer hand untouched; buried_bottom emptied;
+	# new bottom = previously buried 8.
+	assert_eq(controller.game_round.get_hand_size(0), dealer_hand_after_bury)
+	assert_eq(controller.game_round.get_hand_size(1), attacker_hand_at_window)
+	assert_eq(controller.game_round.bottom.size(), rc.bottom_size)
+	assert_eq(controller.game_round.buried_bottom.size(), 0)
+	# Bottom transferred verbatim from dealer's buried_bottom snapshot.
+	assert_eq(controller.game_round.bottom.size(), dealer_buried_bottom_snapshot.size())
+	for i: int in range(dealer_buried_bottom_snapshot.size()):
+		assert_true(controller.game_round.bottom[i].equals(dealer_buried_bottom_snapshot[i]))
+
+	# Counter winner re-buries; ends with same hand size as a normal post-bury.
+	_dealer_burys_and_advance()
+	assert_eq(controller.current_phase, "playing")
+	assert_eq(controller.game_round.get_hand_size(1), rc.hand_size)
+	assert_eq(controller.game_round.get_hand_size(0), rc.hand_size)
+	assert_eq(controller.game_round.buried_bottom.size(), rc.bottom_size)
+
+
 func _force_round_ready_for_settlement(
 	round: GameRound,
 	dealer: int,
