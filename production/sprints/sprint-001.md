@@ -1,7 +1,8 @@
 # Sprint 1 — M0 规则引擎
 
-> **Status**: Active
+> **Status**: Completed
 > **Created**: 2026-04-16
+> **Completed**: 2026-04 (released as part of v0.4.0, commit `ec67b0a`)
 > **Sprint Goal**: 实现双升的核心数据层和规则逻辑，可通过单元测试验证所有牌型定义、主副牌判定和出牌合法性校验。
 
 ---
@@ -19,28 +20,28 @@
 
 | ID | Task | 对应 GDD | Est. | 依赖 | 验收标准 | 状态 |
 |----|------|---------|------|------|---------|------|
-| S1-01 | Card 数据结构（Suit、Rank、Joker、Card） | F1 card-types | 1d | — | F1 AC1-AC4 | ⬜ |
-| S1-02 | 跳级序列与相邻性判定 | F1 card-types | 1d | S1-01 | F1 AC5-AC8 | ⬜ |
-| S1-03 | 牌型识别（Single/Pair/Tractor/Dump 枚举与识别） | F1 card-types | 2d | S1-02 | F1 AC9-AC14 | ⬜ |
-| S1-04 | RuleConfig 数据结构与校验 | F3 rule-config | 1d | S1-01 | F3 AC1-AC6 | ⬜ |
-| S1-05 | 牌组生成与洗牌 | F2 deck-management | 0.5d | S1-01, S1-04 | F2 AC1-AC4 | ⬜ |
-| S1-06 | 主副牌判定（get_suit_domain、get_sort_value） | C1 trump-determination | 1d | S1-01, S1-04 | C1 AC1-AC11 | ⬜ |
-| S1-07 | 出牌合法性校验（首出 + 跟牌） | C2 play-validation | 3d | S1-03, S1-06 | C2 AC1-AC8 | ⬜ |
-| S1-08 | 赢墩判定（含主牌杀结构匹配） | C2 play-validation | 1d | S1-07 | C2 AC8-AC14 | ⬜ |
+| S1-01 | Card 数据结构（Suit、Rank、Joker、Card） | F1 card-types | 1d | — | F1 AC1-AC4 | ✅ |
+| S1-02 | 跳级序列与相邻性判定 | F1 card-types | 1d | S1-01 | F1 AC5-AC8 | ✅ |
+| S1-03 | 牌型识别（Single/Pair/Tractor/Dump 枚举与识别） | F1 card-types | 2d | S1-02 | F1 AC9-AC14 | ✅ |
+| S1-04 | RuleConfig 数据结构与校验 | F3 rule-config | 1d | S1-01 | F3 AC1-AC6 | ✅ |
+| S1-05 | 牌组生成与洗牌 | F2 deck-management | 0.5d | S1-01, S1-04 | F2 AC1-AC4 | ✅ |
+| S1-06 | 主副牌判定（get_suit_domain、get_sort_value） | C1 trump-determination | 1d | S1-01, S1-04 | C1 AC1-AC11 | ✅ |
+| S1-07 | 出牌合法性校验（首出 + 跟牌） | C2 play-validation | 3d | S1-03, S1-06 | C2 AC1-AC8 | ✅ |
+| S1-08 | 赢墩判定（含主牌杀结构匹配） | C2 play-validation | 1d | S1-07 | C2 AC8-AC14 | ✅ |
 
 ### Should Have
 
 | ID | Task | 对应 GDD | Est. | 依赖 | 验收标准 | 状态 |
 |----|------|---------|------|------|---------|------|
-| S1-09 | 分值追踪 | C5 score-tracking | 0.5d | S1-01 | C5 AC1-AC6 | ⬜ |
-| S1-10 | 升级结算（含抠底倍数、不可跳过级） | C6 upgrade-settlement | 1d | S1-09, S1-04 | C6 AC1-AC11 | ⬜ |
-| S1-11 | GUT 测试框架搭建 + 测试入口 | — | 0.5d | — | gut 命令可运行所有测试 | ⬜ |
+| S1-09 | 分值追踪 | C5 score-tracking | 0.5d | S1-01 | C5 AC1-AC6 | ✅ |
+| S1-10 | 升级结算（含抠底倍数、不可跳过级） | C6 upgrade-settlement | 1d | S1-09, S1-04 | C6 AC1-AC11 | ✅ |
+| S1-11 | GUT 测试框架搭建 + 测试入口 | — | 0.5d | — | gut 命令可运行所有测试 | ✅ |
 
 ### Nice to Have
 
 | ID | Task | 对应 GDD | Est. | 依赖 | 验收标准 | 状态 |
 |----|------|---------|------|------|---------|------|
-| S1-12 | 亮主声明逻辑（BidDeclaration 强度比较） | C3 trump-bidding | 1d | S1-04, S1-06 | C3 AC1-AC13 | ⬜ |
+| S1-12 | 亮主声明逻辑（BidDeclaration 强度比较） | C3 trump-bidding | 1d | S1-04, S1-06 | C3 AC1-AC13 | ✅ |
 
 ---
 
@@ -56,11 +57,11 @@
 
 ## Definition of Done
 
-- [ ] S1-01 至 S1-08（Must Have）全部完成
-- [ ] 所有 GDD 中的 Acceptance Criteria 有对应单元测试
-- [ ] 测试全部通过
-- [ ] 代码遵循 Technical Preferences 中的命名规范
-- [ ] 无需 UI——全部通过测试验证
+- [x] S1-01 至 S1-08（Must Have）全部完成
+- [x] 所有 GDD 中的 Acceptance Criteria 有对应单元测试
+- [x] 测试全部通过
+- [x] 代码遵循 Technical Preferences 中的命名规范
+- [x] 无需 UI——全部通过测试验证
 
 ---
 
@@ -68,4 +69,4 @@
 
 | 日期 | 完成任务 | 备注 |
 |------|---------|------|
-| — | — | Sprint 尚未开始 |
+| 2026-04 | S1-01 ~ S1-12 全部完成 | 随 v0.4.0 (`ec67b0a`) 发布；117 个 GUT 测试通过 |
