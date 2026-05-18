@@ -39,6 +39,53 @@ static func decide_bid(seat_id: int, hand: Array, current_rank: int, rule_config
 
 
 # ============================================================
+# Counter-bid decision (attacker may reverse trump after dealer's bury)
+# ============================================================
+
+## Decide whether to counter-bid against the current dealer's declaration.
+## Returns null when AI declines (pass).
+## Mirrors decide_bid's hand-strength heuristic so the AI doesn't mass-counter
+## with weak hands and destabilize automated regressions.
+static func decide_counter(
+	seat_id: int,
+	hand: Array,
+	current_rank: int,
+	current_bid: TrumpBidding.BidDeclaration,
+	rule_config: RuleConfig
+) -> TrumpBidding.BidDeclaration:
+	if current_bid == null:
+		return null
+	if not TrumpBidding.can_be_countered(current_bid):
+		return null
+
+	var available := TrumpBidding.get_available_bids(seat_id, hand, current_rank, rule_config)
+	var stronger: Array = []
+	for b: TrumpBidding.BidDeclaration in available:
+		if TrumpBidding.is_stronger(b, current_bid):
+			stronger.append(b)
+	if stronger.is_empty():
+		return null
+
+	# Pick strongest stronger option.
+	var best: TrumpBidding.BidDeclaration = stronger[0]
+	for i: int in range(1, stronger.size()):
+		if TrumpBidding.is_stronger(stronger[i], best):
+			best = stronger[i]
+
+	# Same hand-strength gate as decide_bid: only counter if the hand is decent.
+	var trump_strength := 0
+	for c: Card in hand:
+		if c.is_joker:
+			trump_strength += 3
+		elif c.rank == current_rank:
+			trump_strength += 2
+	if trump_strength >= 4:
+		return best
+	# Otherwise pass — don't counter on weak hands.
+	return null
+
+
+# ============================================================
 # Bury decision (when AI is dealer)
 # ============================================================
 
