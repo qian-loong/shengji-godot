@@ -93,19 +93,21 @@ static func is_stronger(challenger: BidDeclaration, current: BidDeclaration) -> 
 	return _bid_strength(challenger) > _bid_strength(current)
 
 
-## Check if a bid can be countered.
-## ADR-0002: PAIR_JOKER (公主) AND JOKER_PAIR_RANK (王+对) are both immune.
-##   - PAIR_JOKER: highest strength tier, no stronger bid exists by enum value.
-##   - JOKER_PAIR_RANK: only PAIR_JOKER would be strictly stronger; per ADR-0002
-##                     we shield it as well, making JPR a "counter-shield" so
-##                     that the dealer's 3-key-card investment can't be reversed
-##                     by attackers' 2-card pair-joker hand.
+## Whether a winning bid can still be overturned in the counter window.
+##
+## Rule (ADR-0002 + ADR-0003): only the *single* entry tier of each ladder is
+## counterable. The "pair" tier and everything above it is counter-immune,
+## symmetrically across both bid modes:
+##
+##   mode A (no joker): SINGLE_RANK ✅ | PAIR_RANK ❌ | PAIR_JOKER ❌
+##   mode B (joker):    JOKER_SINGLE_RANK ✅ | JOKER_PAIR_RANK ❌ | PAIR_JOKER ❌
+##
+## Rationale: committing a *pair* of key cards (or a pair of jokers) is a real
+## investment that should not be reversible by an opponent's single 2-card
+## hand. Single-card declarations carry no such investment and stay contestable.
+## NONE / unknown types are treated as non-counterable (nothing to overturn).
 static func can_be_countered(bid: BidDeclaration) -> bool:
-	if bid.bid_type == BidType.PAIR_JOKER:
-		return false
-	if bid.bid_type == BidType.JOKER_PAIR_RANK:
-		return false
-	return true
+	return bid.bid_type == BidType.SINGLE_RANK or bid.bid_type == BidType.JOKER_SINGLE_RANK
 
 
 static func _bid_strength(bid: BidDeclaration) -> int:

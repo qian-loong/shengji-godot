@@ -316,6 +316,23 @@ func test_counter_window_skipped_on_joker_pair_rank_bid() -> void:
 	assert_eq(result["error"], "not_counter_window")
 
 
+func test_counter_window_skipped_on_pair_rank_bid() -> void:
+	# ADR-0003: dealer plays PAIR_RANK (对级, mode A) — immune like JOKER_PAIR_RANK.
+	# Counter window must NOT open; controller advances directly to "playing".
+	_setup_at_burying(false, 0, TrumpBidding.BidType.PAIR_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+
+	assert_eq(controller.current_phase, "playing")
+	assert_true(controller.state.counter_attempted)
+	# Defensive: a hand-crafted submit_counter_or_pass after PAIR_RANK bury must error.
+	var hostile_decl := TrumpBidding.BidDeclaration.new(
+		1, TrumpBidding.BidType.PAIR_JOKER, -1
+	)
+	var result := controller.submit_counter_or_pass(1, hostile_decl)
+	assert_false(result["ok"])
+	assert_eq(result["error"], "not_counter_window")
+
+
 func test_counter_window_skipped_on_no_bid() -> void:
 	# Non-first-game with 公主局（no bid declared）— cannot be countered.
 	_setup_at_burying(false, 0, TrumpBidding.BidType.NONE, -1)

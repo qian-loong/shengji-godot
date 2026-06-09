@@ -101,13 +101,22 @@ func test_joker_pair_rank_immune_to_counter() -> void:
 	var bid := TrumpBidding.BidDeclaration.new(0, BT.JOKER_PAIR_RANK, S.HEART)
 	assert_false(TrumpBidding.can_be_countered(bid),
 		"JOKER_PAIR_RANK is immune to counter-bid (ADR-0002)")
-	# Sanity: JOKER_SINGLE_RANK (s=3) and below remain counterable.
+	# Sanity: the single-tier entry of mode B remains counterable.
 	var jsr := TrumpBidding.BidDeclaration.new(0, BT.JOKER_SINGLE_RANK, S.HEART)
 	assert_true(TrumpBidding.can_be_countered(jsr),
 		"JOKER_SINGLE_RANK still counterable")
+
+
+func test_pair_rank_immune_to_counter() -> void:
+	# ADR-0003: symmetric with ADR-0002 — the mode-A "pair" tier (PAIR_RANK) is
+	# counter-immune too, so only single-card tiers can ever be countered.
 	var pair := TrumpBidding.BidDeclaration.new(0, BT.PAIR_RANK, S.HEART)
-	assert_true(TrumpBidding.can_be_countered(pair),
-		"PAIR_RANK still counterable")
+	assert_false(TrumpBidding.can_be_countered(pair),
+		"PAIR_RANK is immune to counter-bid (ADR-0003)")
+	# Sanity: the single-tier entry of mode A remains counterable.
+	var single := TrumpBidding.BidDeclaration.new(0, BT.SINGLE_RANK, S.HEART)
+	assert_true(TrumpBidding.can_be_countered(single),
+		"SINGLE_RANK still counterable")
 
 
 func test_strength_pair_rank_beats_single_rank() -> void:
