@@ -36,6 +36,11 @@ var current_phase: String = "idle"  # idle, bidding, burying, leading, following
 var waiting_for_input: bool = false
 var _bid_seat_index: int = 0  # tracks position in bidding rotation
 
+# Optional fixed base seed for deterministic replay.
+# Set via `--seed=N` command line; round_seed = base_seed + round_num - 1
+# (matches game_session.gd formula so both modes can replay the same sequence).
+var base_seed: int = -1  # -1 = random each round
+
 # Play phase state
 var trick_play_cards: Array = []
 var trick_seat_index: int = 0
@@ -49,8 +54,16 @@ var ui_log_lines: Array[String] = []
 
 
 func _ready() -> void:
+	_parse_cli_args()
 	_build_ui()
 	_start_new_game()
+
+
+func _parse_cli_args() -> void:
+	for arg: String in OS.get_cmdline_args():
+		if arg.begins_with("--seed="):
+			base_seed = arg.split("=")[1].to_int()
+			print("[TUI] 使用固定基础种子: %d（每局 seed = %d + round_num - 1）" % [base_seed, base_seed])
 
 
 # ============================================================
@@ -186,7 +199,8 @@ func _start_round() -> void:
 	round_num += 1
 	current_rank = team_ranks[current_dealer % 2]
 	rule_config.current_rank = current_rank
-	var round_seed := randi()
+	# Deterministic replay if --seed=N was provided (matches game_session.gd formula).
+	var round_seed := (base_seed + round_num - 1) if base_seed >= 0 else randi()
 
 	# Controller owns round_num increment; host increments only for legacy display state.
 	round_num -= 1
