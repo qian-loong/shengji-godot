@@ -130,6 +130,8 @@ func log_bid(declaration, no_bid: bool = false) -> void:
 		"type_name": bid_type_name(declaration.bid_type),
 		"suit": declaration.suit,
 		"suit_symbol": "公主" if declaration.suit < 0 else Card.suit_symbol(declaration.suit),
+		"rank": declaration.rank,
+		"rank_symbol": "—" if declaration.rank < 0 else Card.rank_symbol(declaration.rank),
 	}
 	# 亮主后真正的 dealer 可能变化，更新到 round 元数据
 	_current_round["dealer"] = declaration.seat_id
@@ -179,12 +181,15 @@ func log_bury(merged_hand: Array, selected_indices: Array[int], buried_cards: Ar
 ## Log a successful counter-bid event (dealer position is NOT changed; only trump_suit
 ## and the bottom are replaced — see counter-bid-plan.md D1 / D3).
 func log_counter_bid(declaration, original_trump_suit: int) -> void:
+	var rank_symbol := "—" if declaration.rank < 0 else Card.rank_symbol(declaration.rank)
 	var entry: Dictionary = {
 		"seat": declaration.seat_id,
 		"type": declaration.bid_type,
 		"type_name": bid_type_name(declaration.bid_type),
 		"suit": declaration.suit,
 		"suit_symbol": "公主" if declaration.suit < 0 else Card.suit_symbol(declaration.suit),
+		"rank": declaration.rank,
+		"rank_symbol": rank_symbol,
 		"original_trump_suit": original_trump_suit,
 		"original_trump_symbol": "公主" if original_trump_suit < 0 else Card.suit_symbol(original_trump_suit),
 	}
@@ -198,6 +203,8 @@ func log_counter_bid(declaration, original_trump_suit: int) -> void:
 		"type_name": bid_type_name(declaration.bid_type),
 		"suit": declaration.suit,
 		"suit_symbol": "公主" if declaration.suit < 0 else Card.suit_symbol(declaration.suit),
+		"rank": declaration.rank,
+		"rank_symbol": rank_symbol,
 		"countered_from_trump": original_trump_suit,
 	}
 	# trump_suit on the round metadata is updated; dealer / teams stay untouched.
@@ -283,20 +290,46 @@ func log_trick_result(winner: int, trick_score: int, attack_score: int, reason: 
 # Settlement logging
 # ============================================================
 
-func log_settlement(s: UpgradeSettlement.SettlementResult) -> void:
+## 记录结算结果。
+## 期望传入 EffectiveSettlement（会话层裁决后的值），日志同时保留
+## proposed（得分层提案）与 effective（真实生效）两份，便于复盘"提案
+## 与实际的差异"（例如：提案升到 J、但必打级拦回 10）。
+##
+## 顶层字段（new_rank / game_over 等）沿用 effective 值，与 state 一致，
+## 保持既有消费者的兼容。历史 v2 日志的字段语义 = 现在的 effective。
+func log_settlement(effective: EffectiveSettlement) -> void:
+	var proposal := effective.proposal
 	_current_round["settlement"] = {
-		"attack_base_score": s.attack_base_score,
-		"bottom_score": s.bottom_score,
-		"bottom_multiplier": s.bottom_multiplier,
-		"bottom_bonus": s.bottom_bonus,
-		"final_score": s.final_score,
-		"upgrading_side": s.upgrading_side,
-		"upgrade_levels": s.upgrade_levels,
-		"new_rank": s.new_rank,
-		"new_rank_symbol": Card.rank_symbol(s.new_rank),
-		"dealer_dethroned": s.dealer_dethroned,
-		"new_dealer": s.new_dealer,
-		"game_over": s.game_over,
+		"attack_base_score": effective.attack_base_score,
+		"bottom_score": effective.bottom_score,
+		"bottom_multiplier": effective.bottom_multiplier,
+		"bottom_bonus": effective.bottom_bonus,
+		"final_score": effective.final_score,
+		"upgrading_side": effective.upgrading_side,
+		"upgrading_team": effective.upgrading_team,
+		"dealer_dethroned": effective.dealer_dethroned,
+		# 顶层 = effective（真实生效值）
+		"upgrade_levels": effective.upgrade_levels,
+		"new_rank": effective.new_rank,
+		"new_rank_symbol": Card.rank_symbol(effective.new_rank),
+		"new_dealer": effective.new_dealer,
+		"game_over": effective.game_over,
+		"upgrade_blocked": effective.upgrade_blocked,
+		# 裁决细节：提案 vs 实际
+		"proposed": {
+			"upgrade_levels": proposal.upgrade_levels,
+			"new_rank": proposal.new_rank,
+			"new_rank_symbol": Card.rank_symbol(proposal.new_rank),
+			"new_dealer": proposal.new_dealer,
+			"game_over": proposal.game_over,
+		},
+		"effective": {
+			"upgrade_levels": effective.upgrade_levels,
+			"new_rank": effective.new_rank,
+			"new_rank_symbol": Card.rank_symbol(effective.new_rank),
+			"new_dealer": effective.new_dealer,
+			"game_over": effective.game_over,
+		},
 	}
 
 

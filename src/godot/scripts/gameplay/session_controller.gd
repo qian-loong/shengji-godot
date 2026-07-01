@@ -9,7 +9,10 @@ var logger: GameLogger
 var state: SessionState
 var game_round: GameRound
 var current_phase: String = "idle"
-var last_settlement: UpgradeSettlement.SettlementResult = null
+## 最近一次 finish_round 产出的裁决对象。
+## 类型是 EffectiveSettlement（会话层裁决后的值），与真实 state 一致；
+## 需要读原始提案时用 last_settlement.proposal。
+var last_settlement: EffectiveSettlement = null
 var bid_seat_index: int = 0
 var bidding_resolved: bool = false
 var trick_num: int = 0
@@ -282,7 +285,10 @@ func get_counter_context(seat: int) -> Dictionary:
 		return _error("wrong_counter_seat")
 
 	var hand := game_round.get_hand(seat)
-	var bid_rank := state.get_team_rank_for_seat(seat)
+	# ADR-0004: counter-bids must use the *current round rank* (dealer's team
+	# rank), not the counter-attacker's own team rank. This makes UI options
+	# consistent with `AIPlayer.decide_counter` which already uses current_rank.
+	var bid_rank := state.current_rank
 	var available := TrumpBidding.get_available_bids(seat, hand, bid_rank, rule_config)
 	var stronger: Array = []
 	for b: TrumpBidding.BidDeclaration in available:
@@ -332,8 +338,40 @@ func submit_counter_or_pass(
 		if logger:
 			logger.log_bid_attempt(seat, "counter_rejected", "not_stronger")
 		return _error("counter_not_stronger")
+	# ADR-0004 门 2: defensive rank check. Counter-bids must use current-round
+	# rank cards (PAIR_JOKER exempt). Rejects hand-crafted declarations that
+	# bypass `get_counter_context`'s candidate filter (门 1).
+	if not TrumpBidding.matches_rank(declaration, state.current_rank):
+		if logger:
+			logger.log_bid_attempt(seat, "counter_rejected", "rank_mismatch")
+		return _error("counter_rank_mismatch")
+	if not _counter_declaration_is_available(seat, declaration):
+		if logger:
+			logger.log_bid_attempt(seat, "counter_rejected", "not_in_hand")
+		return _error("counter_not_in_hand")
 
 	return _apply_counter(declaration)
+
+
+func _counter_declaration_is_available(seat: int, declaration: TrumpBidding.BidDeclaration) -> bool:
+	var context := get_counter_context(seat)
+	if not context.get("ok", false):
+		return false
+	for available: TrumpBidding.BidDeclaration in context.get("available_counter_bids", []):
+		if _same_bid_declaration(available, declaration):
+			return true
+	return false
+
+
+static func _same_bid_declaration(
+	a: TrumpBidding.BidDeclaration,
+	b: TrumpBidding.BidDeclaration,
+) -> bool:
+	return a != null and b != null \
+		and a.seat_id == b.seat_id \
+		and a.bid_type == b.bid_type \
+		and a.suit == b.suit \
+		and a.rank == b.rank
 
 
 func _apply_counter(declaration: TrumpBidding.BidDeclaration) -> Dictionary:
@@ -531,6 +569,15 @@ func _log_bid_skip(seat: int, reason: String) -> void:
 		logger.log_bid_attempt(seat, "skip", reason)
 
 
+## 结算并推进到下一局／游戏结束。
+##
+## 严格顺序（必须保证）：
+##   1. calculate_settlement()：得到得分层提案（不写日志）
+##   2. record_dealer_round()：登记庄家资历，供必打级检查
+##   3. apply_settlement()：叠加跨局约束，得到 EffectiveSettlement + 真实 state
+##   4. log_settlement(effective)：日志记录的是最终裁决，不是提案
+##   5. end_round()：flush 当前 round
+## 反过来（比如在步骤 3 之前写日志）会让日志与真实状态发散。
 func finish_round() -> Dictionary:
 	if game_round == null:
 		return _error("missing_game_round")
@@ -539,15 +586,28 @@ func finish_round() -> Dictionary:
 
 	var actual_dealer := game_round.dealer_seat
 	var attack_rank := state.team_ranks[SessionState.get_attack_team(actual_dealer)]
-	last_settlement = game_round.calculate_settlement(attack_rank)
+	var proposal := game_round.calculate_settlement(attack_rank)
+
+	state.record_dealer_round(actual_dealer, state.current_rank)
+	var effective := state.apply_settlement(proposal, actual_dealer, rule_config)
+	last_settlement = effective
+	current_phase = "game_over" if state.game_over else "round_end"
+
 	if logger:
+		logger.log_settlement(effective)
 		logger.end_round()
 
-	var applied := state.apply_settlement(last_settlement, actual_dealer)
-	current_phase = "game_over" if state.game_over else "round_end"
-	applied["phase"] = current_phase
-	applied["settlement"] = last_settlement
-	return _ok(applied)
+	return _ok({
+		"phase": current_phase,
+		"settlement": effective,
+		"upgrading_team": effective.upgrading_team,
+		"game_over": effective.game_over,
+		"upgrade_blocked": effective.upgrade_blocked,
+		"current_dealer": state.current_dealer,
+		"current_rank": state.current_rank,
+		"team_ranks": state.team_ranks.duplicate(),
+		"is_first_game": state.is_first_game,
+	})
 
 
 func get_round_summary() -> Dictionary:

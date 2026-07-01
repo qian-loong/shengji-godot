@@ -263,9 +263,12 @@ func _remove_card_from_hand(seat: int, card: Card) -> void:
 # Phase 5: Settlement
 # ============================================================
 
+## 计算得分层的结算"提案"。不写日志——日志需要包含跨局裁决结果
+## （必打级拦截、game_over 修正），由 SessionController.finish_round()
+## 在 state.apply_settlement() 之后统一记录 EffectiveSettlement。
 func calculate_settlement(attack_rank: int = -1) -> UpgradeSettlement.SettlementResult:
 	var last_winner_is_attack := last_trick_winner in attack_team
-	var s := UpgradeSettlement.calculate(
+	return UpgradeSettlement.calculate(
 		score_tracker.get_attack_score(),
 		buried_bottom,
 		dealer_seat,
@@ -275,9 +278,6 @@ func calculate_settlement(attack_rank: int = -1) -> UpgradeSettlement.Settlement
 		rule_config,
 		attack_rank,
 	)
-	if logger:
-		logger.log_settlement(s)
-	return s
 
 
 # ============================================================

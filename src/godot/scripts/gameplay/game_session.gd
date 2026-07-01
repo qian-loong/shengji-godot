@@ -109,9 +109,9 @@ func _run_game_loop() -> void:
 		_display_settlement(settlement)
 
 		_sync_host_from_controller()
-		var upgrading_team := session_controller.state.winning_team
-		if upgrading_team < 0:
-			upgrading_team = SessionState.get_upgrading_team(settlement, game_round.dealer_seat)
+		# settlement 现在是 EffectiveSettlement——game_over 与 upgrading_team
+		# 已经反映必打级拦截后的真实状态，直接读即可，无需再从 state 反推。
+		var upgrading_team := settlement.upgrading_team
 
 		if settlement.game_over:
 			print("\n🏆 游戏结束！%s 获胜！" % TEAM_NAMES[upgrading_team])
@@ -128,7 +128,7 @@ func _run_game_loop() -> void:
 # Single round
 # ============================================================
 
-func _play_one_round() -> UpgradeSettlement.SettlementResult:
+func _play_one_round() -> EffectiveSettlement:
 	round_num += 1
 	var round_seed := game_seed + round_num - 1 if game_seed >= 0 else randi()
 
@@ -362,7 +362,7 @@ func _play_phase() -> void:
 # Settlement display
 # ============================================================
 
-func _display_settlement(s: UpgradeSettlement.SettlementResult) -> void:
+func _display_settlement(s: EffectiveSettlement) -> void:
 	print("\n╔══════════════ 结算 ══════════════╗")
 	print("  出牌阶段攻方得分: %d" % s.attack_base_score)
 	if s.bottom_multiplier > 0:
@@ -371,7 +371,13 @@ func _display_settlement(s: UpgradeSettlement.SettlementResult) -> void:
 		print("  庄家方赢最后一墩，底牌不计分")
 	print("  最终得分: %d" % s.final_score)
 	var side_str := "攻方" if s.upgrading_side == 1 else "庄家方"
-	if s.upgrade_levels > 0:
+	if s.upgrade_blocked:
+		# 提案想升，但会话层必打级拦回，展示两者差异便于调试。
+		print("  %s 提案升 %d 级 → %s（必打级拦截，实际留在 %s）" % [
+			side_str, s.proposal.upgrade_levels,
+			Card.rank_symbol(s.proposal.new_rank),
+			Card.rank_symbol(s.new_rank)])
+	elif s.upgrade_levels > 0:
 		print("  %s 升 %d 级 → 新级: %s" % [side_str, s.upgrade_levels, Card.rank_symbol(s.new_rank)])
 	elif s.dealer_dethroned:
 		print("  攻方下庄（未升级）")

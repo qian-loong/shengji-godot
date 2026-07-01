@@ -292,3 +292,47 @@ func test_joker_pair_rank_color_match_disabled_allows_cross_color() -> void:
 		if b.bid_type == BT.JOKER_PAIR_RANK and b.suit == S.SPADE:
 			has_jpr_spade = true
 	assert_true(has_jpr_spade, "no color-match → JOKER_PAIR_RANK ♠ generated")
+
+
+# ============================================================
+# ADR-0004: counter-bid rank must match current-round rank
+# ============================================================
+
+
+## get_available_bids should stamp declaration.rank with the current_rank arg
+## for all non-PAIR_JOKER bids; PAIR_JOKER stays -1 (no rank component).
+func test_get_available_bids_stamps_rank_on_declarations() -> void:
+	rc.bid_requires_joker = true
+	rc.trump_joker_color_match = false
+	var hand: Array = [
+		Card.joker(J.BIG),
+		Card.joker(J.BIG),  # 2 same jokers → PAIR_JOKER
+		Card.normal(S.HEART, R.FOUR),
+		Card.normal(S.HEART, R.FOUR),  # pair → JOKER_PAIR_RANK ♥
+	]
+	var bids := TrumpBidding.get_available_bids(0, hand, R.FOUR, rc)
+	for b: TrumpBidding.BidDeclaration in bids:
+		if b.bid_type == BT.PAIR_JOKER:
+			assert_eq(b.rank, -1, "PAIR_JOKER has no rank component (rank = -1)")
+		else:
+			assert_eq(b.rank, R.FOUR, "non-PAIR_JOKER bid stamped with current_rank")
+
+
+func test_matches_rank_helper() -> void:
+	# Non-PAIR_JOKER: rank must equal current_rank exactly.
+	var sr := TrumpBidding.BidDeclaration.new(0, BT.SINGLE_RANK, S.HEART, R.FOUR)
+	assert_true(TrumpBidding.matches_rank(sr, R.FOUR),
+		"SINGLE_RANK rank=4 matches current_rank=4")
+	assert_false(TrumpBidding.matches_rank(sr, R.FIVE),
+		"SINGLE_RANK rank=4 does NOT match current_rank=5")
+
+	var pr := TrumpBidding.BidDeclaration.new(0, BT.PAIR_RANK, S.SPADE, R.THREE)
+	assert_false(TrumpBidding.matches_rank(pr, R.TWO),
+		"PAIR_RANK rank=3 does NOT match current_rank=2 (the reported bug scenario)")
+
+	# PAIR_JOKER is exempt regardless of rank field or current_rank.
+	var pj := TrumpBidding.BidDeclaration.new(0, BT.PAIR_JOKER, -1, -1)
+	assert_true(TrumpBidding.matches_rank(pj, R.TWO),
+		"PAIR_JOKER exempt from rank check (current_rank=2)")
+	assert_true(TrumpBidding.matches_rank(pj, R.ACE),
+		"PAIR_JOKER exempt from rank check (current_rank=A)")

@@ -374,21 +374,25 @@ func _on_bid_skip() -> void:
 func _start_bury() -> void:
 	current_phase = "burying"
 	var context := session_controller.get_bury_context()
-	var dealer: int = context["dealer"]
+	# 反主后 bury_seat = 反家（≠ dealer）。必须用 bury_seat 判断是否人类扣底，
+	# 否则反主人是人类时会被误判成"AI 扣底"，UI 不显示配底面板直接跳到出牌。
+	var bury_seat: int = context.get("bury_seat", context["dealer"])
+	var is_counter_re_bury: bool = context.get("is_counter_re_bury", false)
+	var label := "反家" if is_counter_re_bury else "庄家"
 
-	if dealer != human_seat:
+	if bury_seat != human_seat:
 		# AI bury
 		var merged: Array = context["merged_hand"]
 		var indices := AIPlayer.decide_bury(merged, rule_config.bottom_size,
 			game_round.trump_suit, current_rank, rule_config)
 		session_controller.submit_bury(indices)
-		_log("%s 完成配底" % SEAT_NAMES[dealer])
+		_log("%s（%s）完成配底" % [SEAT_NAMES[bury_seat], label])
 		_auto_save_log()
 		_after_bury_done()
 	else:
 		# Human bury
 		var merged: Array = context["merged_hand"]
-		_log("\n[color=green]— 配底阶段 —[/color] 选 %d 张扣底" % rule_config.bottom_size)
+		_log("\n[color=green]— 配底阶段（%s）—[/color] 选 %d 张扣底" % [label, rule_config.bottom_size])
 		selected_indices = []
 		_refresh_hand_display_for_bury(merged)
 		_show_bury_actions()
@@ -670,7 +674,7 @@ func _resolve_trick() -> void:
 
 func _finish_round() -> void:
 	var finish := session_controller.finish_round()
-	var settlement: UpgradeSettlement.SettlementResult = finish["settlement"]
+	var settlement: EffectiveSettlement = finish["settlement"]
 	_sync_host_from_controller()
 
 	_log("\n[color=yellow]═══════ 结算 ═══════[/color]")
@@ -685,7 +689,12 @@ func _finish_round() -> void:
 	var team_names: Array[String] = ["南北队", "东西队"]
 	var team_name: String = team_names[upgrading_team]
 
-	if settlement.upgrade_levels > 0:
+	if settlement.upgrade_blocked:
+		_log("[color=orange]%s 提案升 %d 级 → %s，但必打级拦截，实际留在 %s[/color]" % [
+			team_name, settlement.proposal.upgrade_levels,
+			Card.rank_symbol(settlement.proposal.new_rank),
+			Card.rank_symbol(settlement.new_rank)])
+	elif settlement.upgrade_levels > 0:
 		_log("%s 升 %d 级 → 新级: %s" % [team_name, settlement.upgrade_levels, Card.rank_symbol(settlement.new_rank)])
 	elif settlement.dealer_dethroned:
 		_log("攻方下庄（不升级）")

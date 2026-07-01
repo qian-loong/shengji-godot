@@ -63,7 +63,7 @@ func test_sync_rank_to_actual_dealer_updates_rule_round_and_logger() -> void:
 
 
 func test_finish_round_uses_attack_team_own_rank() -> void:
-	controller.state.team_ranks = [R.FIVE, R.THREE]
+	controller.state.team_ranks = [R.SIX, R.THREE]
 	controller.state.current_dealer = 1
 	controller.start_round(45678)
 	_force_round_ready_for_settlement(controller.game_round, 1, true, 155)
@@ -73,10 +73,130 @@ func test_finish_round_uses_attack_team_own_rank() -> void:
 	assert_true(result["ok"])
 	assert_eq(result["phase"], "round_end")
 	assert_eq(result["upgrading_team"], 0)
-	assert_eq(controller.state.team_ranks[0], R.SIX)
+	assert_eq(controller.state.team_ranks[0], R.SEVEN)
 	assert_eq(controller.state.team_ranks[1], R.THREE)
 	assert_false(controller.state.is_first_game)
 	assert_eq(controller.state.current_dealer, 2)
+	# P0/P1 一致性：finish 返回的 settlement 与 state 完全对齐。
+	var effective: EffectiveSettlement = result["settlement"]
+	assert_eq(effective.new_rank, R.SEVEN, "effective.new_rank matches team_ranks[0]")
+	assert_eq(effective.upgrading_team, 0)
+	assert_false(effective.game_over)
+	assert_false(effective.upgrade_blocked)
+	assert_eq(effective.new_dealer, 2, "dethrone → new_dealer == next seat")
+
+
+## P0/P1/P2 综合回归：必打级拦截场景下，finish_round 返回的 settlement 与
+## 日志里的 settlement 必须都反映真实状态（10，不是提案里的 J），而不是提案。
+func test_finish_round_reflects_no_skip_block_in_settlement_and_log() -> void:
+	# 南北队 at 10 从未打过 10 庄；东家 dealer 打 3 级，攻方 130 分 → 提案升 1 到 J。
+	# 会话层必打级拦回：team_ranks[0] 应留在 10。
+	controller.state.team_ranks = [R.TEN, R.THREE]
+	controller.state.current_dealer = 1
+	controller.state.record_dealer_round(0, R.TWO)
+	controller.state.record_dealer_round(0, R.THREE)
+	controller.state.record_dealer_round(0, R.FIVE)
+	controller.state.record_dealer_round(0, R.EIGHT)
+	controller.start_round(88888)
+	_force_round_ready_for_settlement(controller.game_round, 1, true, 130)
+
+	var result := controller.finish_round()
+
+	assert_true(result["ok"])
+	assert_true(result["upgrade_blocked"])
+	# P0：finish["settlement"].new_rank 必须与 state.team_ranks 一致。
+	var effective: EffectiveSettlement = result["settlement"]
+	assert_eq(effective.new_rank, R.TEN, "P0: settlement reflects blocked rank")
+	assert_eq(effective.upgrade_levels, 0, "P0: blocked → effective upgrade_levels == 0")
+	assert_true(effective.upgrade_blocked)
+	# 提案值可查证"本来会升到 J"。
+	assert_eq(effective.proposal.new_rank, R.JACK)
+	assert_eq(effective.proposal.upgrade_levels, 1)
+	# state 与 effective 严格一致。
+	assert_eq(controller.state.team_ranks[0], R.TEN)
+	assert_eq(controller.state.team_ranks, [R.TEN, R.THREE] as Array[int])
+	# P2：日志里也是拦截后的真实值，同时保留提案供复盘。
+	var round_log: Dictionary = logger.get_log()["rounds"][0]
+	var settlement_log: Dictionary = round_log["settlement"]
+	assert_eq(settlement_log["new_rank"], R.TEN, "P2: log records effective new_rank")
+	assert_true(settlement_log["upgrade_blocked"])
+	assert_eq(settlement_log["effective"]["new_rank"], R.TEN)
+	assert_eq(settlement_log["proposed"]["new_rank"], R.JACK,
+		"log preserves proposal for replay")
+
+
+## P1 契约测试：EffectiveSettlement 保证"upgrade_blocked ⇒ game_over 归零"。
+##
+## 关于场景选择：目前默认 no_skip_ranks = [5,10,K]，不含 A；而得分层
+## proposal.game_over=true 要求 rank_for_game_over==A（"从 A 起升才结束"）。
+## 因此在**当前**默认规则下，"proposal.game_over=true 且 upgrade_blocked=true"
+## 天然不会共存，无法构造真实对局场景。
+##
+## 但一旦规则扩展（例如把 A 加入 no_skip_ranks，或未来引入其它拦截路径）
+## 分歧就会实兑。EffectiveSettlement.from_proposal 是唯一的合并点，
+## 契约测试保证它无论 proposal 说什么，只要 upgrade_blocked=true 就把
+## game_over/upgrade_levels 归零。这样 P1 的隐患被封死在类型层。
+func test_effective_settlement_forces_game_over_false_when_blocked() -> void:
+	# 手工构造一个 proposal，假装其自身就想 game_over。
+	var proposal := UpgradeSettlement.SettlementResult.new()
+	proposal.attack_base_score = 120
+	proposal.final_score = 120
+	proposal.upgrading_side = 1
+	proposal.upgrade_levels = 1
+	proposal.new_rank = R.ACE
+	proposal.new_dealer = 2
+	proposal.dealer_dethroned = true
+	proposal.game_over = true  # 提案自称游戏结束
+
+	# upgrade_blocked=true 时：无论 proposal.game_over 是什么，
+	# effective 一律归零，且 upgrade_levels 也归零。
+	var blocked := EffectiveSettlement.from_proposal(
+		proposal,
+		0,           # upgrading_team
+		R.KING,      # effective_new_rank（拦回起点）
+		false,       # effective_game_over（由 SessionState 依据 upgrade_blocked 计算）
+		0,           # effective_new_dealer（此处不关注）
+		true,        # upgrade_blocked
+	)
+	assert_false(blocked.game_over, "P1: blocked → effective.game_over must be false")
+	assert_eq(blocked.upgrade_levels, 0, "P0: blocked → effective.upgrade_levels == 0")
+	assert_eq(blocked.new_rank, R.KING)
+	# 但 proposal 一定被保留原样，日志复盘时能看到"本来会怎样"。
+	assert_true(blocked.proposal.game_over)
+	assert_eq(blocked.proposal.new_rank, R.ACE)
+	assert_eq(blocked.proposal.upgrade_levels, 1)
+
+	# 反向：upgrade_blocked=false 时 game_over 完全透传 proposal。
+	var passthrough := EffectiveSettlement.from_proposal(
+		proposal, 0, R.ACE, true, 2, false
+	)
+	assert_true(passthrough.game_over, "not blocked → game_over follows caller")
+	assert_eq(passthrough.upgrade_levels, 1)
+
+
+## P1 集成：finish_round 的返回 dict 与 log 里的 game_over/upgrade_levels
+## 都取自 EffectiveSettlement，而不是 proposal。用不拦截的 game_over 场景
+## 反向证明"正常路径也不会漏字段"。
+func test_finish_round_game_over_reaches_settlement_and_log() -> void:
+	# 庄家侧游戏结束场景：team0 at ACE 打 A 级，dealer 升 1 → game_over。
+	controller.state.team_ranks = [R.ACE, R.FIVE]
+	controller.state.current_dealer = 0
+	controller.start_round(101010)
+	_force_round_ready_for_settlement(controller.game_round, 0, false, 30)
+
+	var result := controller.finish_round()
+
+	assert_true(result["ok"])
+	assert_eq(result["phase"], "game_over")
+	assert_true(result["game_over"])
+	assert_true(controller.state.game_over)
+	var effective: EffectiveSettlement = result["settlement"]
+	assert_true(effective.game_over)
+	assert_eq(effective.upgrading_team, 0)
+	var settlement_log: Dictionary = logger.get_log()["rounds"][0]["settlement"]
+	assert_true(settlement_log["game_over"])
+	assert_true(settlement_log["effective"]["game_over"])
+	assert_true(settlement_log["proposed"]["game_over"])
 
 
 func test_finish_round_rejects_second_finish() -> void:
@@ -107,7 +227,8 @@ func test_submit_bid_syncs_rank_to_actual_dealer_and_enters_burying() -> void:
 	controller.state.team_ranks = [R.EIGHT, R.FIVE]
 	controller.state.current_dealer = 0
 	controller.start_round(22222)
-	var decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
+	# Dealer seat 1 belongs to team 1 (rank = R.FIVE), so the bid's rank card is R.FIVE.
+	var decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART, R.FIVE)
 
 	var result := controller.submit_bid_or_pass(1, decl)
 
@@ -264,7 +385,12 @@ func _setup_at_burying(
 	if bid_type == TrumpBidding.BidType.NONE:
 		controller.resolve_no_bid_default()
 	else:
-		var decl := TrumpBidding.BidDeclaration.new(dealer_seat, bid_type, bid_suit)
+		# ADR-0004: declaration.rank = dealer's team rank (the game will sync
+		# state.current_rank to this on submit_bid_or_pass). For PAIR_JOKER
+		# rank is -1 (no rank component).
+		var bid_rank_val: int = -1 if bid_type == TrumpBidding.BidType.PAIR_JOKER \
+			else controller.state.get_team_rank_for_seat(dealer_seat)
+		var decl := TrumpBidding.BidDeclaration.new(dealer_seat, bid_type, bid_suit, bid_rank_val)
 		controller.submit_bid_or_pass(dealer_seat, decl)
 	assert_eq(controller.current_phase, "burying")
 
@@ -280,6 +406,42 @@ func _dealer_burys_and_advance() -> Array:
 	)
 	controller.submit_bury(indices)
 	return indices
+
+
+func _force_hand_prefix(seat: int, cards: Array) -> void:
+	for i: int in range(cards.size()):
+		controller.game_round.hands[seat][i] = cards[i]
+
+
+func _force_pair_rank_counter_cards(seat: int, suit: int, rank: int) -> void:
+	_force_hand_prefix(seat, [
+		Card.normal(suit, rank),
+		Card.normal(suit, rank),
+	])
+
+
+func _force_joker_pair_rank_counter_cards(seat: int, suit: int, rank: int) -> void:
+	var joker_type := Card.JokerType.BIG \
+		if Card.suit_color(suit) == Card.CardColor.RED else Card.JokerType.SMALL
+	_force_hand_prefix(seat, [
+		Card.joker(joker_type),
+		Card.normal(suit, rank),
+		Card.normal(suit, rank),
+	])
+
+
+func _force_pair_joker_counter_cards(seat: int) -> void:
+	_force_hand_prefix(seat, [
+		Card.joker(Card.JokerType.SMALL),
+		Card.joker(Card.JokerType.SMALL),
+	])
+
+
+func _force_no_counter_cards(seat: int) -> void:
+	var hand: Array = []
+	for _i: int in range(rc.hand_size):
+		hand.append(Card.normal(Card.Suit.CLUB, R.THREE))
+	controller.game_round.hands[seat] = hand
 
 
 func test_counter_window_skipped_on_first_game() -> void:
@@ -309,7 +471,7 @@ func test_counter_window_skipped_on_joker_pair_rank_bid() -> void:
 	assert_true(controller.state.counter_attempted)
 	# Defensive: a hand-crafted submit_counter_or_pass after JPR bury must error.
 	var hostile_decl := TrumpBidding.BidDeclaration.new(
-		1, TrumpBidding.BidType.PAIR_JOKER, -1
+		1, TrumpBidding.BidType.PAIR_JOKER, -1, -1
 	)
 	var result := controller.submit_counter_or_pass(1, hostile_decl)
 	assert_false(result["ok"])
@@ -326,7 +488,7 @@ func test_counter_window_skipped_on_pair_rank_bid() -> void:
 	assert_true(controller.state.counter_attempted)
 	# Defensive: a hand-crafted submit_counter_or_pass after PAIR_RANK bury must error.
 	var hostile_decl := TrumpBidding.BidDeclaration.new(
-		1, TrumpBidding.BidType.PAIR_JOKER, -1
+		1, TrumpBidding.BidType.PAIR_JOKER, -1, -1
 	)
 	var result := controller.submit_counter_or_pass(1, hostile_decl)
 	assert_false(result["ok"])
@@ -344,13 +506,16 @@ func test_counter_window_skipped_on_no_bid() -> void:
 
 func test_counter_succeeds_with_stronger_bid() -> void:
 	# Non-first-game; dealer 0 (team 0,2) bids SINGLE_RANK ♥; attacker 1 counters with PAIR_RANK ♠.
+	rc.bid_requires_joker = false
 	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
 	_dealer_burys_and_advance()
 
 	assert_eq(controller.current_phase, "counter_window")
 	assert_eq(controller.get_current_counter_seat(), 1)
 
-	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE)
+	# ADR-0004: counter's rank must match state.current_rank (= R.TWO here).
+	_force_pair_rank_counter_cards(1, Card.Suit.SPADE, R.TWO)
+	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE, R.TWO)
 	var result := controller.submit_counter_or_pass(1, counter_decl)
 
 	assert_true(result["ok"])
@@ -370,7 +535,7 @@ func test_counter_rejected_with_equal_strength() -> void:
 	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
 	_dealer_burys_and_advance()
 
-	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.SPADE)
+	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.SPADE, R.TWO)
 	var result := controller.submit_counter_or_pass(1, counter_decl)
 
 	assert_false(result["ok"])
@@ -385,7 +550,7 @@ func test_counter_rejected_with_weaker_bid() -> void:
 	_setup_at_burying(false, 0, TrumpBidding.BidType.JOKER_SINGLE_RANK, Card.Suit.HEART)
 	_dealer_burys_and_advance()
 
-	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.SPADE)
+	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.SPADE, R.TWO)
 	var result := controller.submit_counter_or_pass(1, counter_decl)
 
 	assert_false(result["ok"])
@@ -405,7 +570,7 @@ func test_counter_rejected_from_dealer_team() -> void:
 
 	# Manually attempting to counter from dealer-team seat 2 is rejected as
 	# wrong_counter_seat (current poll cursor points at 1).
-	var bad_decl := TrumpBidding.BidDeclaration.new(2, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE)
+	var bad_decl := TrumpBidding.BidDeclaration.new(2, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE, R.TWO)
 	var result := controller.submit_counter_or_pass(2, bad_decl)
 	assert_false(result["ok"])
 	assert_eq(result["error"], "wrong_counter_seat")
@@ -414,10 +579,12 @@ func test_counter_rejected_from_dealer_team() -> void:
 func test_counter_at_most_once_per_round() -> void:
 	# After a successful counter + reburial, phase becomes "playing"; submitting
 	# another counter is rejected with not_counter_window (no second window opens).
+	rc.bid_requires_joker = false
 	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
 	_dealer_burys_and_advance()
 
-	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE)
+	_force_pair_rank_counter_cards(1, Card.Suit.SPADE, R.TWO)
+	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE, R.TWO)
 	controller.submit_counter_or_pass(1, counter_decl)
 	# Counter winner re-buries.
 	_dealer_burys_and_advance()
@@ -425,7 +592,7 @@ func test_counter_at_most_once_per_round() -> void:
 	assert_eq(controller.current_phase, "playing")
 	assert_true(controller.state.counter_attempted)
 
-	var second_decl := TrumpBidding.BidDeclaration.new(3, TrumpBidding.BidType.JOKER_SINGLE_RANK, Card.Suit.CLUB)
+	var second_decl := TrumpBidding.BidDeclaration.new(3, TrumpBidding.BidType.JOKER_SINGLE_RANK, Card.Suit.CLUB, R.TWO)
 	var second_result := controller.submit_counter_or_pass(3, second_decl)
 	assert_false(second_result["ok"])
 	assert_eq(second_result["error"], "not_counter_window")
@@ -434,6 +601,7 @@ func test_counter_at_most_once_per_round() -> void:
 func test_counter_preserves_dealer_lead_rank() -> void:
 	# D1 invariants: dealer_seat / dealer_team / attack_team / current_lead_seat
 	# / current_rank all unchanged after a successful counter.
+	rc.bid_requires_joker = false
 	controller.state.team_ranks = [Card.Rank.EIGHT, Card.Rank.FIVE]
 	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
 	_dealer_burys_and_advance()
@@ -444,7 +612,10 @@ func test_counter_preserves_dealer_lead_rank() -> void:
 	var dealer_team_before: Array = controller.game_round.dealer_team.duplicate()
 	var attack_team_before: Array = controller.game_round.attack_team.duplicate()
 
-	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE)
+	# ADR-0004: counter uses current round rank (dealer team = 0 → R.EIGHT), not
+	# attacker's own team rank (R.FIVE). This is the whole point of the rule.
+	_force_pair_rank_counter_cards(1, Card.Suit.SPADE, R.EIGHT)
+	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE, R.EIGHT)
 	controller.submit_counter_or_pass(1, counter_decl)
 
 	assert_eq(controller.game_round.dealer_seat, dealer_before)
@@ -452,6 +623,90 @@ func test_counter_preserves_dealer_lead_rank() -> void:
 	assert_eq(controller.state.current_rank, rank_before)
 	assert_eq(controller.game_round.dealer_team, dealer_team_before)
 	assert_eq(controller.game_round.attack_team, attack_team_before)
+
+
+## E2E 集成回归：验证"人类反主 → 反家扣底 → 出牌"完整路径。
+##
+## 上一轮修复的 UI bug（`_start_bury` 用 dealer 而非 bury_seat）的根源是
+## controller 的 get_bury_context() 契约容易踩错。本测试直接以 UI 视角
+## 调用 controller，锁死这条契约：
+##   1. counter 成功后 phase 必须回到 "burying"
+##   2. get_bury_context() 里 dealer 保持原庄，bury_seat 变成反家
+##   3. is_counter_re_bury == true，UI 据此展示"反家配底"字样
+##   4. 反家扣底后 phase 推到 "playing"，能完整打完一整局
+## 任何一环回退，这条测试都会立刻炸。
+func test_e2e_human_counter_and_re_bury_full_round() -> void:
+	# 非首局；原庄 seat 0 亮 SINGLE_RANK ♥（可被反）。
+	rc.bid_requires_joker = false
+	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+
+	# 反主窗口应该正常打开，第一个反家是 seat 1。
+	assert_eq(controller.current_phase, "counter_window")
+	assert_eq(controller.get_current_counter_seat(), 1)
+
+	# 模拟人类反家 seat 1 提交反主（PAIR_RANK ♠ 比 SINGLE_RANK 强）。
+	# ADR-0004: rank 用 state.current_rank（这里 team_ranks 默认 [2,2] → R.TWO）。
+	_force_pair_rank_counter_cards(1, Card.Suit.SPADE, R.TWO)
+	var counter_decl := TrumpBidding.BidDeclaration.new(
+		1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE, R.TWO
+	)
+	var counter_result := controller.submit_counter_or_pass(1, counter_decl)
+	assert_true(counter_result["ok"])
+	assert_true(counter_result["counter_made"])
+
+	# 契约核心：phase = "burying"，bury_seat = 反家，dealer 保持原庄。
+	assert_eq(controller.current_phase, "burying")
+	assert_eq(controller.game_round.bury_seat, 1)
+	assert_eq(controller.game_round.dealer_seat, 0, "counter 不换庄")
+
+	# UI 层判断"是否弹配底面板给玩家"依赖这个 context——锁死字段语义。
+	var re_bury_ctx := controller.get_bury_context()
+	assert_true(re_bury_ctx["ok"])
+	assert_eq(re_bury_ctx["dealer"], 0, "context.dealer = 原庄（≠ 反家）")
+	assert_eq(re_bury_ctx["bury_seat"], 1, "context.bury_seat = 反家（UI 应据此判断人类扣底）")
+	assert_true(re_bury_ctx["is_counter_re_bury"], "标志位标注这是反家再扣底阶段")
+	# merged_hand 应该来自反家 —— 25 + 8 = 33。
+	assert_eq((re_bury_ctx["merged_hand"] as Array).size(), rc.hand_size + rc.bottom_size)
+
+	# 反家 seat 1 扣底（这里用 AI 决策代替"人类点 8 张 confirm"）。
+	var indices := AIPlayer.decide_bury(
+		re_bury_ctx["merged_hand"],
+		re_bury_ctx["bottom_size"],
+		re_bury_ctx["trump_suit"],
+		re_bury_ctx["current_rank"],
+		rc
+	)
+	var bury_result := controller.submit_bury(indices)
+	assert_true(bury_result["ok"])
+	assert_eq(bury_result["phase"], "playing", "反家扣底后进入出牌")
+	assert_eq(controller.current_phase, "playing")
+	# 反家和原庄手牌都应回到 25 张；buried_bottom 是反家扣的 8 张。
+	assert_eq(controller.game_round.get_hand_size(0), rc.hand_size, "原庄手牌未变")
+	assert_eq(controller.game_round.get_hand_size(1), rc.hand_size, "反家扣完 25")
+	assert_eq(controller.game_round.buried_bottom.size(), rc.bottom_size)
+
+	# 完整打完一局——如果 counter 路径破坏了 game_round 内部状态，
+	# 中途某个 submit_play 会因手牌/领出错而 assert false。
+	var safety := 0
+	while controller.game_round.get_hand_size(0) > 0 and safety < 40:
+		var started := controller.begin_trick()
+		assert_true(started["ok"])
+		for _i: int in range(4):
+			var turn := controller.get_current_turn_context()
+			var cards := AIPlayer.decide_play(
+				turn["seat"], turn["hand"], turn["lead_info"],
+				turn["game_state"], rc
+			)
+			var submitted := controller.submit_play(turn["seat"], cards)
+			assert_true(submitted["ok"], "反主局出牌途中失败 @ seat=%d" % turn["seat"])
+		safety += 1
+	assert_lt(safety, 40, "反主局能在合理墩数内打完")
+
+	# 能正常结算——finish_round 也走通。
+	var finished := controller.finish_round()
+	assert_true(finished["ok"])
+	assert_true(controller.current_phase in ["round_end", "game_over"])
 
 
 func test_counter_re_bury_uses_dealer_buried_as_new_bottom() -> void:
@@ -465,6 +720,7 @@ func test_counter_re_bury_uses_dealer_buried_as_new_bottom() -> void:
 	#   - buried_bottom.size() = 8
 	#   - counter winner hand size = 25
 	#   - dealer hand size still = 25
+	rc.bid_requires_joker = false
 	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
 	var dealer_buried: Array = _dealer_burys_and_advance()  # noqa: unused
 	dealer_buried = dealer_buried  # silence unused
@@ -472,7 +728,8 @@ func test_counter_re_bury_uses_dealer_buried_as_new_bottom() -> void:
 	var attacker_hand_at_window: int = controller.game_round.get_hand_size(1)
 	var dealer_buried_bottom_snapshot: Array = controller.game_round.buried_bottom.duplicate()
 
-	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE)
+	_force_pair_rank_counter_cards(1, Card.Suit.SPADE, R.TWO)
+	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE, R.TWO)
 	controller.submit_counter_or_pass(1, counter_decl)
 
 	# Right after counter applied: dealer hand untouched; buried_bottom emptied;
@@ -505,8 +762,9 @@ func test_counter_joker_pair_rank_beats_joker_single_rank() -> void:
 	_dealer_burys_and_advance()
 	assert_eq(controller.current_phase, "counter_window")
 
+	_force_joker_pair_rank_counter_cards(1, Card.Suit.SPADE, R.TWO)
 	var counter_decl := TrumpBidding.BidDeclaration.new(
-		1, TrumpBidding.BidType.JOKER_PAIR_RANK, Card.Suit.SPADE
+		1, TrumpBidding.BidType.JOKER_PAIR_RANK, Card.Suit.SPADE, R.TWO
 	)
 	var result := controller.submit_counter_or_pass(1, counter_decl)
 	assert_true(result["ok"])
@@ -525,7 +783,7 @@ func test_counter_rejected_same_tier_different_suit() -> void:
 	_dealer_burys_and_advance()
 
 	var counter_decl := TrumpBidding.BidDeclaration.new(
-		1, TrumpBidding.BidType.JOKER_SINGLE_RANK, Card.Suit.SPADE
+		1, TrumpBidding.BidType.JOKER_SINGLE_RANK, Card.Suit.SPADE, R.TWO
 	)
 	var result := controller.submit_counter_or_pass(1, counter_decl)
 	assert_false(result["ok"])
@@ -533,6 +791,92 @@ func test_counter_rejected_same_tier_different_suit() -> void:
 	# Trump suit unchanged — reject is non-mutating.
 	assert_eq(controller.game_round.trump_suit, Card.Suit.HEART)
 	assert_eq(controller.current_phase, "counter_window")
+
+
+# ============================================================
+# ADR-0004: counter-bid must use current-round rank
+# ============================================================
+
+
+## User-reported scenario ("梅花对3 反 方片2" while dealer team is on rank 2):
+## with team_ranks split, the counter attacker's own team-rank cards no longer
+## qualify as a counter — only the *current round rank* does. The pre-ADR-0004
+## behavior would have let this through purely on strength (PAIR_RANK s=2 > SINGLE_RANK s=1).
+func test_counter_rejected_when_rank_differs_from_current_round() -> void:
+	# Dealer team (0) on rank 8; counter-attacker team (1) on rank 5.
+	controller.state.team_ranks = [Card.Rank.EIGHT, Card.Rank.FIVE]
+	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+	assert_eq(controller.state.current_rank, R.EIGHT, "current_rank locked to dealer team")
+
+	# Attacker seat 1 tries to counter with their own team rank (R.FIVE) — must reject.
+	var counter_decl := TrumpBidding.BidDeclaration.new(
+		1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE, R.FIVE
+	)
+	var result := controller.submit_counter_or_pass(1, counter_decl)
+	assert_false(result["ok"])
+	assert_eq(result["error"], "counter_rank_mismatch",
+		"ADR-0004: rank-mismatch is a distinct error, not counter_not_stronger")
+	# State unchanged.
+	assert_eq(controller.game_round.trump_suit, Card.Suit.HEART)
+	assert_eq(controller.current_phase, "counter_window")
+
+
+func test_counter_rejected_when_declaration_not_in_hand() -> void:
+	rc.bid_requires_joker = false
+	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+	_force_no_counter_cards(1)
+
+	var counter_decl := TrumpBidding.BidDeclaration.new(
+		1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE, R.TWO
+	)
+	var result := controller.submit_counter_or_pass(1, counter_decl)
+
+	assert_false(result["ok"])
+	assert_eq(result["error"], "counter_not_in_hand")
+	assert_eq(controller.game_round.trump_suit, Card.Suit.HEART)
+	assert_eq(controller.current_phase, "counter_window")
+
+
+## Same setup — but attacker uses current-round rank (R.EIGHT). Rank check
+## passes, strength still applies, counter succeeds.
+func test_counter_accepted_when_rank_matches_current_round() -> void:
+	rc.bid_requires_joker = false
+	controller.state.team_ranks = [Card.Rank.EIGHT, Card.Rank.FIVE]
+	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+
+	_force_pair_rank_counter_cards(1, Card.Suit.SPADE, R.EIGHT)
+	var counter_decl := TrumpBidding.BidDeclaration.new(
+		1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE, R.EIGHT
+	)
+	var result := controller.submit_counter_or_pass(1, counter_decl)
+	assert_true(result["ok"])
+	assert_true(result["counter_made"])
+	assert_eq(controller.game_round.bid_declaration.rank, R.EIGHT,
+		"applied counter records current-round rank in declaration")
+	assert_eq(controller.game_round.trump_suit, Card.Suit.SPADE)
+
+
+## PAIR_JOKER (公主) uses two same-suit jokers with no rank component. It must
+## remain valid across team-rank splits — the whole point of the exemption.
+func test_counter_pair_joker_exempt_from_rank_constraint() -> void:
+	controller.state.team_ranks = [Card.Rank.EIGHT, Card.Rank.FIVE]
+	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+
+	# 公主 declaration; suit=-1, rank=-1. matches_rank must exempt this.
+	_force_pair_joker_counter_cards(1)
+	var counter_decl := TrumpBidding.BidDeclaration.new(
+		1, TrumpBidding.BidType.PAIR_JOKER, -1, -1
+	)
+	var result := controller.submit_counter_or_pass(1, counter_decl)
+	assert_true(result["ok"],
+		"ADR-0004: PAIR_JOKER is exempt from the current-round-rank constraint")
+	assert_true(result["counter_made"])
+	# 公主 → trump_suit collapses to -1 (无主).
+	assert_eq(controller.game_round.trump_suit, -1)
 
 
 func _force_round_ready_for_settlement(
