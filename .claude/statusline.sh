@@ -64,15 +64,23 @@ if [ -z "$stage" ]; then
     src_count=$(find "$cwd/src" -type f \( -name "*.gd" -o -name "*.cs" -o -name "*.cpp" -o -name "*.h" -o -name "*.py" -o -name "*.rs" -o -name "*.lua" -o -name "*.tscn" -o -name "*.tres" \) 2>/dev/null | wc -l | tr -d ' ')
   fi
 
+  # Check for ADRs (signals Pre-Production phase)
+  has_adrs=false
+  if ls "$cwd/docs/architecture/"adr-*.md 2>/dev/null | head -1 | grep -q .; then
+    has_adrs=true
+  fi
+
   # Determine stage (check from most-advanced backward)
   if [ "$src_count" -ge 10 ] 2>/dev/null; then
     stage="Production"
-  elif [ "$engine_configured" = true ]; then
+  elif [ "$has_adrs" = true ]; then
     stage="Pre-Production"
-  elif [ "$has_systems" = true ]; then
+  elif [ "$engine_configured" = true ]; then
     stage="Technical Setup"
-  elif [ "$has_concept" = true ]; then
+  elif [ "$has_systems" = true ]; then
     stage="Systems Design"
+  elif [ "$has_concept" = true ]; then
+    stage="Concept"
   else
     stage="Concept"
   fi

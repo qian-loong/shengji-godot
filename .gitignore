@@ -11,14 +11,19 @@ Desktop.ini
 
 # === Claude Code Local ===
 .claude/settings.local.json
-.claude/docs/UPGRADE-PLAN.md
 CLAUDE.local.md
 production/session-logs/
-production/session-state/*.md
 
 # === Internal Planning (not for public) ===
-docs/IMPROVEMENTS-PROPOSAL.md
-docs/MULTI-STAGE-DOCUMENT-WORKFLOW.md
+
+expansions/
+
+# === Marrow (eval tooling — never commit) ===
+marrow/
+
+# === Runtime Artifacts (auto-generated, start empty on fresh clone) ===
+# Created on first use by /consistency-check and /architecture-review
+docs/consistency-failures.md
 
 # === Game Replay Logs (large JSON, do not commit) ===
 docs/game-logs/*.json

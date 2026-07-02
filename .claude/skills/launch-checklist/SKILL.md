@@ -4,28 +4,36 @@ description: "Complete launch readiness validation covering every department: co
 argument-hint: "[launch-date or 'dry-run']"
 user-invocable: true
 allowed-tools: Read, Glob, Grep, Write
+model: sonnet
 ---
-
-When this skill is invoked:
 
 > **Explicit invocation only**: This skill should only run when the user explicitly requests it with `/launch-checklist`. Do not auto-invoke based on context matching.
 
-1. **Read the argument** for the launch date or `dry-run` mode. Dry-run mode
-   generates the checklist without creating sign-off entries.
+## Phase 1: Parse Arguments
 
-2. **Gather project context**:
-   - Read `CLAUDE.md` for tech stack, target platforms, and team structure
-   - Read the latest milestone in `production/milestones/`
-   - Read any existing release checklist in `production/releases/`
-   - Read the content calendar in `design/live-ops/content-calendar.md` if it exists
+Read the argument for the launch date or `dry-run` mode. Dry-run mode generates the checklist without creating sign-off entries or writing files.
 
-3. **Scan codebase health**:
-   - Count `TODO`, `FIXME`, `HACK` comments and their locations
-   - Check for any `console.log`, `print()`, or debug output left in production code
-   - Check for placeholder assets (search for `placeholder`, `temp_`, `WIP_`)
-   - Check for hardcoded test/dev values (localhost, test credentials, debug flags)
+---
 
-4. **Generate the launch checklist**:
+## Phase 2: Gather Project Context
+
+- Read `CLAUDE.md` for tech stack, target platforms, and team structure
+- Read the latest milestone in `production/milestones/`
+- Read any existing release checklist in `production/releases/`
+- Read the content calendar in `design/live-ops/content-calendar.md` if it exists
+
+---
+
+## Phase 3: Scan Codebase Health
+
+- Count `TODO`, `FIXME`, `HACK` comments and their locations
+- Check for any `console.log`, `print()`, or debug output left in production code
+- Check for placeholder assets (search for `placeholder`, `temp_`, `WIP_`)
+- Check for hardcoded test/dev values (localhost, test credentials, debug flags)
+
+---
+
+## Phase 4: Generate the Launch Checklist
 
 ```markdown
 # Launch Checklist: [Game Title]
@@ -214,8 +222,19 @@ Generated: [Date]
 - [ ] Release Manager — Build and deployment readiness
 ```
 
-5. **Save the checklist** to
-   `production/releases/launch-checklist-[date].md`, creating directories as needed.
+---
 
-6. **Output a summary** to the user: total items, blocking items count,
-   conditional items count, departments with incomplete sections, and the file path.
+## Phase 5: Save Checklist
+
+Present the completed checklist and summary to the user (total items, blocking items count, conditional items count, departments with incomplete sections).
+
+If not in dry-run mode, ask: "May I write this to `production/releases/launch-checklist-[date].md`?"
+
+If yes, write the file, creating directories as needed.
+
+---
+
+## Phase 6: Next Steps
+
+- Run `/gate-check` to get a formal PASS/CONCERNS/FAIL verdict before launch.
+- Coordinate sign-offs via `/team-release`.

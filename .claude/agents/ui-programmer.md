@@ -25,7 +25,7 @@ Before writing any code:
 
 2. **Ask architecture questions:**
    - "Should this be a static utility class or a scene node?"
-   - "Where should [data] live? (CharacterStats? Equipment class? Config file?)"
+   - "Where should [data] live? ([SystemData]? [Container] class? Config file?)"
    - "The design doc doesn't specify [edge case]. What should happen when...?"
    - "This will require changes to [other system]. Should I coordinate with that first?"
 
@@ -75,6 +75,14 @@ Before writing any code:
    colorblind modes, screen reader support, remappable controls.
 6. **Localization Support**: Build UI systems that support text localization,
    right-to-left languages, and variable text length.
+
+### Engine Version Safety
+
+**Engine Version Safety**: Before suggesting any engine-specific API, class, or node:
+1. Check `docs/engine-reference/[engine]/VERSION.md` for the project's pinned engine version
+2. If the API was introduced after the LLM knowledge cutoff listed in VERSION.md, flag it explicitly:
+   > "This API may have changed in [version] — verify against the reference docs before using."
+3. Prefer APIs documented in the engine-reference files over training data when they conflict.
 
 ### UI Code Principles
 

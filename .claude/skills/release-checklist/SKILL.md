@@ -4,31 +4,38 @@ description: "Generates a comprehensive pre-release validation checklist coverin
 argument-hint: "[platform: pc|console|mobile|all]"
 user-invocable: true
 allowed-tools: Read, Glob, Grep, Write
+model: sonnet
 ---
-
-When this skill is invoked:
 
 > **Explicit invocation only**: This skill should only run when the user explicitly requests it with `/release-checklist`. Do not auto-invoke based on context matching.
 
-1. **Read the argument** for the target platform (`pc`, `console`, `mobile`,
-   or `all`). If no platform is specified, default to `all`.
+## Phase 1: Parse Arguments
 
-2. **Read CLAUDE.md** for project context, version information, and platform
-   targets.
+Read the argument for the target platform (`pc`, `console`, `mobile`, or `all`). If no platform is specified, default to `all`.
 
-3. **Read the current milestone** from `production/milestones/` to understand
-   what features and content should be included in this release.
+---
 
-4. **Scan the codebase** for outstanding issues:
-   - Count `TODO` comments
-   - Count `FIXME` comments
-   - Count `HACK` comments
-   - Note their locations and severity
+## Phase 2: Load Project Context
 
-5. **Check for test results** in any test output directories or CI logs if
-   available.
+- Read `CLAUDE.md` for project context, version information, and platform targets.
+- Read the current milestone from `production/milestones/` to understand what features and content should be included in this release.
 
-6. **Generate the release checklist**:
+---
+
+## Phase 3: Scan Codebase
+
+Scan for outstanding issues:
+
+- Count `TODO` comments
+- Count `FIXME` comments
+- Count `HACK` comments
+- Note their locations and severity
+
+Check for test results in any test output directories or CI logs if available.
+
+---
+
+## Phase 4: Generate the Release Checklist
 
 ```markdown
 ## Release Checklist: [Version] -- [Platform]
@@ -68,9 +75,9 @@ Generated: [Date]
 - [ ] Credits complete and accurate
 ```
 
-7. **Add platform-specific sections** based on the argument:
+Add platform-specific sections based on the argument:
 
-For `pc`:
+**For `pc`:**
 ```markdown
 ### Platform Requirements: PC
 - [ ] Minimum and recommended specs verified and documented
@@ -85,7 +92,7 @@ For `pc`:
 - [ ] Steam Deck compatibility verified (if targeting)
 ```
 
-For `console`:
+**For `console`:**
 ```markdown
 ### Platform Requirements: Console
 - [ ] TRC/TCR/Lotcheck requirements checklist complete
@@ -99,7 +106,7 @@ For `console`:
 - [ ] First-party certification submission prepared
 ```
 
-For `mobile`:
+**For `mobile`:**
 ```markdown
 ### Platform Requirements: Mobile
 - [ ] App store guidelines compliance verified
@@ -114,8 +121,7 @@ For `mobile`:
 - [ ] App size within store limits
 ```
 
-8. **Add store and launch sections**:
-
+**Store and launch sections (all platforms):**
 ```markdown
 ### Store / Distribution
 - [ ] Store page metadata complete and proofread
@@ -158,9 +164,19 @@ resolution and estimated time to address them.]
 - [ ] Creative Director
 ```
 
-9. **Save the checklist** to
-   `production/releases/release-checklist-[version].md`, creating the
-   directory if it does not exist.
+---
 
-10. **Output a summary** to the user with: total checklist items, number of
-    known blockers (FIXME/HACK counts, known bugs), and the file path.
+## Phase 5: Save Checklist
+
+Present the checklist to the user with: total checklist items, number of known blockers (FIXME/HACK counts, known bugs).
+
+Ask: "May I write this to `production/releases/release-checklist-[version].md`?"
+
+If yes, write the file, creating the directory if needed.
+
+---
+
+## Phase 6: Next Steps
+
+- Run `/gate-check` for a formal phase gate verdict before proceeding to release.
+- Coordinate final sign-offs via `/team-release`.

@@ -4,7 +4,148 @@ This directory contains realistic, end-to-end session transcripts showing how th
 
 ---
 
+## Visual Reference
+
+**New to the system? Start here:**
+[Skill Flow Diagrams](skill-flow-diagrams.md) — visual maps of all 7 phases and how skills chain together.
+
+---
+
 ## 📚 **Available Examples**
+
+### CORE WORKFLOW
+
+### [Skill Flow Diagrams](skill-flow-diagrams.md)
+**Type:** Visual Reference
+**Complexity:** All levels
+
+Full pipeline overview (zero to ship), plus detailed chain diagrams for:
+design-system, story lifecycle, UX pipeline, and brownfield onboarding.
+**Start here if you want to understand how the pieces fit together.**
+
+---
+
+### [Session: Authoring a GDD with /design-system](session-design-system-skill.md)
+**Type:** Design (skill-driven)
+**Skill:** `/design-system`
+**Duration:** ~60 minutes (14 turns)
+**Complexity:** Medium
+
+**Scenario:**
+Dev runs `/design-system movement` after `/map-systems` produced the systems index. The skill loads context from the game concept and dependency GDDs, runs a technical feasibility pre-check, then guides through all 8 GDD sections one at a time — drafting, approving, and writing each section to disk before moving to the next.
+
+**Key Moments:**
+- Technical feasibility pre-check flags Jolt physics default change (Godot 4.6)
+- Incremental writing: each section on disk immediately after approval
+- Session crash during section 5 → agent resumes from first empty section
+- Dependency signals (stamina, inventory) surfaced during the Dependencies section
+- Ends with explicit handoff: "run `/design-review` before the next system"
+
+**Learn:**
+- How `/design-system` is different from asking an agent to "write a GDD"
+- How the section-by-section cycle prevents 30k-token context bloat
+- How incremental file writing survives session crashes
+- How the skill surfaces downstream dependency contracts
+
+---
+
+### [Session: Full Story Lifecycle](session-story-lifecycle.md)
+**Type:** Full Workflow
+**Skills:** `/story-readiness` → implementation → `/story-done`
+**Duration:** ~50 minutes (13 turns)
+**Complexity:** Medium
+
+**Scenario:**
+Dev picks up a story from the sprint backlog. `/story-readiness` catches a roll-direction ambiguity before any code is written. After implementation, `/story-done` verifies 9 acceptance criteria, identifies 2 deferred criteria (inventory not integrated yet), and closes the story with notes.
+
+**Key Moments:**
+- `/story-readiness` catches spec ambiguity in Turn 2 — resolved before implementation starts
+- ADR status check: story would be BLOCKED if ADR was still Proposed
+- Manifest version check: confirms story's guidance hasn't drifted from current architecture
+- Deferred criteria tracked (not lost) when integration not yet possible
+- `sprint-status.yaml` updated at story close, next ready story surfaced automatically
+
+**Learn:**
+- Why `/story-readiness` prevents late-implementation ambiguity
+- How deferred criteria work (COMPLETE WITH NOTES vs. BLOCKED)
+- How TR-ID references prevent false deviation flags
+- The full loop from backlog → implemented → closed
+
+---
+
+### [Session: Gate Check and Phase Transition](session-gate-check-phase-transition.md)
+**Type:** Phase Gate
+**Skill:** `/gate-check`
+**Duration:** ~20 minutes (7 turns)
+**Complexity:** Low
+
+**Scenario:**
+Dev completes the Systems Design phase and runs `/gate-check` to advance. The gate finds all 6 MVP GDDs complete, cross-review passed with one low-severity concern. Gate passes, `stage.txt` updated, and the agent provides a specific ordered checklist for Technical Setup.
+
+**Key Moments:**
+- Gate validates artifact presence AND internal completeness (8 sections per GDD)
+- CONCERNS ≠ FAIL: low-severity cross-review note passes the gate
+- stage.txt update changes what `/help`, `/sprint-status`, and all skills see going forward
+- Agent surfaces the cross-review concern as a concrete ADR to write next
+- Next phase checklist is specific and ordered, not generic
+
+**Learn:**
+- What a gate check actually validates (not just "do files exist?")
+- How PASS/CONCERNS/FAIL verdicts work
+- Why stage.txt is the authority for phase tracking
+- What changes after a phase transition
+
+---
+
+### [Session: UX Pipeline — /ux-design → /ux-review → /team-ui](session-ux-pipeline.md)
+**Type:** UX Design Pipeline
+**Skills:** `/ux-design`, `/ux-review`, `/team-ui`
+**Duration:** ~90 minutes (16 turns)
+**Complexity:** Medium-High
+
+**Scenario:**
+Dev designs the HUD and inventory screen. `/ux-design` reads the player journey and GDDs to ground decisions in player emotional state. `/ux-review` catches a blocking accessibility gap (no keyboard alternative to drag-drop) and an advisory colorblind issue. After fixes, `/team-ui` accepts the handoff.
+
+**Key Moments:**
+- HUD philosophy choice (diegetic vs. persistent vs. tactical) grounded in survival genre conventions
+- `/ux-review` distinguishes BLOCKING (stops handoff) vs. ADVISORY (can fix in visual pass)
+- Accessibility caught before implementation, not during QA
+- Keyboard alternative added in one turn; review re-runs and passes
+- `/team-ui` checks for a passing `/ux-review` before starting visual design
+
+**Learn:**
+- How `/ux-design` uses player journey context to ground UI decisions
+- What `/ux-review` actually checks (not just "does a spec exist?")
+- The difference between HUD doc (`design/ux/hud.md`) and per-screen specs
+- How accessibility issues are handled at design time vs. implementation time
+
+---
+
+### [Session: Brownfield Onboarding with /adopt](session-adopt-brownfield.md)
+**Type:** Brownfield Adoption
+**Skill:** `/adopt`
+**Duration:** ~30 minutes (8 turns)
+**Complexity:** Low-Medium
+
+**Scenario:**
+Dev has 3 months of existing code and rough design notes but nothing in the right format. `/adopt` audits format compliance (not just file existence), classifies 4 gaps by severity, builds an ordered 7-step migration plan, and immediately fixes the BLOCKING gap (missing systems index) by inferring it from the codebase.
+
+**Key Moments:**
+- FORMAT audit distinguishes "file exists" from "file has required internal structure"
+- BLOCKING gap identified: missing systems index prevents 4+ skills from running
+- Migration plan is ordered: blocking gaps first, then high, then medium
+- Systems index bootstrapped from code structure — brownfield code contains the answer
+- Retrofit mode vs. new authoring: `/design-system retrofit` fills gaps without overwriting
+
+**Learn:**
+- The difference between `/adopt` and `/project-stage-detect`
+- How format compliance is checked (section detection, not just file presence)
+- How brownfield projects can onboard without losing existing work
+- When to use retrofit mode vs. full authoring
+
+---
+
+### FOUNDATIONAL EXAMPLES
 
 ### [Session: Designing the Crafting System](session-design-crafting-system.md)
 **Type:** Design
@@ -83,6 +224,17 @@ Solo dev faces crisis: Alpha milestone in 2 weeks, crafting system needs 3 weeks
 
 ---
 
+### [Reverse Documentation Workflow](reverse-document-workflow-example.md)
+**Type:** Brownfield Documentation
+**Agent:** game-designer
+**Duration:** ~20 minutes
+**Complexity:** Low
+
+**Scenario:**
+Developer built a skill tree system but never wrote a design doc. Agent reads the code, infers the design intent, asks clarifying questions about ambiguous decisions, and produces a retroactive GDD.
+
+---
+
 ## 🎯 **What These Examples Demonstrate**
 
 All examples follow the **collaborative workflow pattern:**
@@ -135,7 +287,13 @@ Read these examples BEFORE your first session. They show realistic expectations 
 - Agents provide expert guidance and options
 
 ### For Understanding Specific Workflows:
-- **Designing a system?** → Read session-design-crafting-system.md
+- **New to the system?** → Read skill-flow-diagrams.md first
+- **Running /design-system for the first time?** → Read session-design-system-skill.md
+- **Picking up a story?** → Read session-story-lifecycle.md
+- **Finishing a phase?** → Read session-gate-check-phase-transition.md
+- **Starting UI work?** → Read session-ux-pipeline.md
+- **Have an existing project?** → Read session-adopt-brownfield.md
+- **Designing a system (agent-driven)?** → Read session-design-crafting-system.md
 - **Implementing code?** → Read session-implement-combat-damage.md
 - **Making strategic decisions?** → Read session-scope-crisis-decision.md
 

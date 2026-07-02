@@ -14,6 +14,10 @@ Or check `README.md` for the version badge.
 ## Table of Contents
 
 - [Upgrade Strategies](#upgrade-strategies)
+- [v1.0.0-beta → v1.0](#v100-beta--v10)
+- [v0.4.x → v1.0](#v04x--v10)
+- [v0.4.0 → v0.4.1](#v040--v041)
+- [v0.3.0 → v0.4.0](#v030--v040)
 - [v0.2.0 → v0.3.0](#v020--v030)
 - [v0.1.0 → v0.2.0](#v010--v020)
 
@@ -74,6 +78,477 @@ Best when: you didn't use git to set up the template (just downloaded a zip).
 2. Copy the files listed under **"Safe to overwrite"** directly.
 3. For files under **"Merge carefully"**, open both versions side-by-side
    and manually merge the structural changes while keeping your content.
+
+---
+
+## v0.4.1
+
+**Released:** 2026-04-02
+**Key themes:** Art direction integration, asset specification pipeline
+
+### What Changed
+
+| Category | Changes |
+|----------|---------|
+| **New skill** | `/art-bible` — guided section-by-section visual identity authoring (9 sections). Mandatory art-director Task spawn per section. AD-ART-BIBLE sign-off gate. Required at Technical Setup phase. |
+| **New skill** | `/asset-spec` — per-asset visual spec and AI generation prompt generator. Reads art bible + GDD/level/character docs. Writes `design/assets/specs/` files and `design/assets/asset-manifest.md`. Full/lean/solo modes. |
+| **New director gates (3)** | `AD-CONCEPT-VISUAL` (brainstorm Phase 4), `AD-ART-BIBLE` (art bible sign-off), `AD-PHASE-GATE` (gate-check panel) |
+| **`/brainstorm` update** | Added `Task` to allowed-tools (was missing — blocked all director spawning). Art-director now spawns in parallel with creative-director after pillars lock. Visual Identity Anchor written to game-concept.md. |
+| **`/gate-check` update** | Art-director added as 4th parallel director (AD-PHASE-GATE). Visual artifact checks: Visual Identity Anchor (Concept gate), art bible (Technical Setup gate), AD-ART-BIBLE sign-off + character visual profiles (Pre-Production gate). |
+| **`/team-level` update** | Art-director added to Step 1 parallel spawn (visual direction before layout). Level-designer now receives art-director targets as explicit constraints. Step 4 art-director role corrected to production-concepts only. |
+| **`/team-narrative` update** | Art-director added to Phase 2 parallel spawn (character visual design, environmental storytelling, cinematic tone). |
+| **`/design-system` update** | Routing table expanded with art-director + technical-artist for Combat, UI, Dialogue, Animation/VFX, Character categories. Visual/Audio section now mandatory (with art-director Task spawn) for 7 system categories. |
+| **`workflow-catalog.yaml`** | `/art-bible` added to Technical Setup (required). `/asset-spec` added to Pre-Production (optional, repeatable). |
+
+### Files: Safe to Overwrite
+
+**New files to add:**
+```
+.claude/skills/art-bible/SKILL.md
+.claude/skills/asset-spec/SKILL.md
+.claude/docs/director-gates.md
+```
+
+**Existing files to overwrite (no user content):**
+```
+.claude/skills/brainstorm/SKILL.md
+.claude/skills/gate-check/SKILL.md
+.claude/skills/team-level/SKILL.md
+.claude/skills/team-narrative/SKILL.md
+.claude/skills/design-system/SKILL.md
+.claude/docs/workflow-catalog.yaml
+README.md
+UPGRADING.md
+```
+
+### Files: Merge Carefully
+
+None — all changes are to infrastructure files with no user content.
+
+---
+
+## v1.0.0-beta → v1.0
+
+**Released:** 2026-05-13
+**Commit range:** `49d1e45..HEAD`
+**Key themes:** New `/vertical-slice` gate, skill polish & bug fixes, contributor docs
+
+### What Changed
+
+| Category | Changes |
+|----------|---------|
+| **New skill** | `/vertical-slice` — Pre-Production gate that validates the full game loop with a production-quality end-to-end build before Production. Pairs with the overhauled `/prototype` (concept validation right after `/brainstorm`). |
+| **New flow** | Entity inventory step in `/map-systems` — surfaces all named entities up front for cleaner downstream GDD authoring. |
+| **UX polish** | Added missing `AskUserQuestion` widgets to 7 skills; comprehensive skill audit for consistency, prompts, and flow gaps; exposed `--review` flag in `argument-hints` for all `team-*` skills. |
+| **Bug fixes** | `#21` log-agent hooks logged "unknown" `agent_type`; `#36` missing `allowed-tools` in `/architecture-decision` and `/story-done`; `#42` `rg --type gdscript` is invalid (now uses `--glob *.gd`); `#43` session-start preview showed oldest state instead of newest; `#45` duplicate `## 0.` heading and broken step numbering in `/architecture-decision`. |
+| **Project docs** | Added `CONTRIBUTING.md` (framework contribution guidelines) and `SECURITY.md` (coordinated disclosure policy). |
+| **Counts/refs** | Synced agent/skill/hook counts across `WORKFLOW-GUIDE.md`, `README.md`, and agent rosters; fixed stale agent names and skill model-tier fields. |
+
+---
+
+### Files: Safe to Overwrite
+
+**New files to add:**
+```
+.claude/skills/vertical-slice/SKILL.md
+CONTRIBUTING.md
+SECURITY.md
+```
+
+**Existing files to overwrite (no user content):**
+- All files under `.claude/skills/` modified in the commit range (skill audit + AskUserQuestion widgets + `--review` argument-hints)
+- `.claude/hooks/log-agent.sh` (fix #21)
+- `README.md`, `docs/WORKFLOW-GUIDE.md`, `docs/examples/skill-flow-diagrams.md`
+- `UPGRADING.md`
+
+---
+
+### Files: Merge Carefully
+
+None — all changes are to infrastructure files with no user content.
+
+---
+
+## v0.4.x → v1.0
+
+**Released:** 2026-03-29
+**Commit range:** `6c041ac..HEAD`
+**Key themes:** Director gates system, gate intensity modes, Godot C# specialist
+
+### What Changed
+
+| Category | Changes |
+|----------|---------|
+| **New system** | Director gates — named review checkpoints shared across all workflow skills. Defined in `.claude/docs/director-gates.md` |
+| **New feature** | Gate intensity modes: `full` (all director gates), `lean` (phase gates only), `solo` (no directors). Set globally via `production/review-mode.txt` during `/start`, or override per-run with `--review [mode]` on any gate-using skill |
+| **New agent** | `godot-csharp-specialist` — C# code quality in Godot 4 projects |
+| **Skill updates (13)** | All gate-using skills now parse `--review [full\|lean\|solo]` and include it in their argument-hint: `brainstorm`, `map-systems`, `design-system`, `architecture-decision`, `create-architecture`, `create-epics`, `create-stories`, `sprint-plan`, `milestone-review`, `playtest-report`, `prototype`, `story-done`, `gate-check` |
+| **`/start` update** | Added Phase 3b — sets review mode during onboarding, writes `production/review-mode.txt` |
+| **`/setup-engine` update** | Language selection step for Godot (GDScript vs C#) |
+| **Docs** | `director-gates.md` — full gate catalog; `WORKFLOW-GUIDE.md` — Director Review Modes section; `README.md` — review intensity customization |
+
+---
+
+### Files: Safe to Overwrite
+
+**New files to add:**
+```
+.claude/agents/godot-csharp-specialist.md
+.claude/docs/director-gates.md
+```
+
+**Existing files to overwrite (no user content):**
+```
+.claude/skills/brainstorm/SKILL.md
+.claude/skills/map-systems/SKILL.md
+.claude/skills/design-system/SKILL.md
+.claude/skills/architecture-decision/SKILL.md
+.claude/skills/create-architecture/SKILL.md
+.claude/skills/create-epics/SKILL.md
+.claude/skills/create-stories/SKILL.md
+.claude/skills/sprint-plan/SKILL.md
+.claude/skills/milestone-review/SKILL.md
+.claude/skills/playtest-report/SKILL.md
+.claude/skills/prototype/SKILL.md
+.claude/skills/story-done/SKILL.md
+.claude/skills/gate-check/SKILL.md
+.claude/skills/start/SKILL.md
+.claude/skills/quick-design/SKILL.md
+.claude/skills/setup-engine/SKILL.md
+README.md
+docs/WORKFLOW-GUIDE.md
+UPGRADING.md
+```
+
+---
+
+### Files: Merge Carefully
+
+No files require manual merging in this release. All changes are to infrastructure files with no user content.
+
+---
+
+### New Features
+
+#### Director Gates System
+
+All major workflow skills now reference named gate checkpoints defined in
+`.claude/docs/director-gates.md`. Gates are identified by domain prefix and name
+(e.g., `CD-CONCEPT`, `TD-ARCHITECTURE`, `LP-CODE-REVIEW`). Each gate defines
+which director to spawn, what inputs to pass, what verdicts mean, and how
+lean/solo modes affect it.
+
+Skills spawn gates using `Task` with the gate ID and documented inputs, rather
+than embedding director prompts inline. This keeps skill bodies clean and makes
+gate behavior consistent across all workflow phases.
+
+#### Gate Intensity Modes
+
+Three modes let you control how much director review you get:
+
+- **`full`** (default) — all director gates run at every review checkpoint
+- **`lean`** — per-skill director reviews are skipped; phase gates at `/gate-check` still run
+- **`solo`** — no director gates anywhere; `/gate-check` checks artifact existence only
+
+Set globally during `/start` (writes `production/review-mode.txt`). Override any
+individual run with `--review [mode]` on any gate-using skill:
+
+```
+/design-system combat --review lean
+/gate-check concept --review full
+/brainstorm my-game-idea --review solo
+```
+
+---
+
+### After Upgrading
+
+1. Run `/start` once to set your preferred review mode — or create `production/review-mode.txt` manually with `full`, `lean`, or `solo`.
+2. If you're mid-project, review `.claude/docs/director-gates.md` to understand which gates apply to your current phase.
+3. Run `/skill-test static all` to verify all skills pass structural checks.
+
+---
+
+## v0.4.0 → v0.4.1
+
+**Released:** 2026-03-26
+**Commit range:** `04ed5d5..HEAD`
+**Key themes:** Genre-agnostic agents, new skills, skill fixes
+
+### What Changed
+
+| Category | Changes |
+|----------|---------|
+| **New skills (1)** | `/consistency-check` — cross-GDD entity consistency scanner |
+| **Skill fixes (all team-*)** | Added no-argument guards, formal `Verdict: COMPLETE / BLOCKED` keywords, per-step AskUserQuestion gates, adjacent area dependency checks (team-level), ethics enforcement (team-live-ops), NO-GO path with Phase skip (team-release) |
+| **Agent fixes (4)** | Genre-agnostic language in game-designer, systems-designer, economy-designer, live-ops-designer — removed RPG-specific terms |
+
+---
+
+### Files: Safe to Overwrite
+
+**New files to add:**
+```
+.claude/skills/consistency-check/SKILL.md
+```
+
+**Existing files to overwrite (no user content):**
+```
+.claude/skills/team-combat/SKILL.md      ← no-arg guard, verdict keywords, gate improvements
+.claude/skills/team-narrative/SKILL.md   ← no-arg guard, verdict keywords, gate improvements
+.claude/skills/team-ui/SKILL.md          ← no-arg guard, verdict keywords, gate improvements
+.claude/skills/team-release/SKILL.md     ← no-arg guard, verdict keywords, NO-GO path
+.claude/skills/team-polish/SKILL.md      ← no-arg guard, verdict keywords, gate improvements
+.claude/skills/team-audio/SKILL.md       ← no-arg guard, verdict keywords, gate improvements
+.claude/skills/team-level/SKILL.md       ← no-arg guard, verdict keywords, adjacent area checks
+.claude/skills/team-live-ops/SKILL.md    ← no-arg guard, verdict keywords, ethics enforcement
+.claude/skills/team-qa/SKILL.md          ← no-arg guard, verdict keywords, gate improvements
+.claude/skills/map-systems/SKILL.md      ← verdict keywords
+.claude/skills/create-epics/SKILL.md     ← "May I write" protocol fix, verdict keywords
+.claude/skills/create-stories/SKILL.md   ← verdict keywords
+.claude/agents/game-designer.md          ← genre-agnostic language
+.claude/agents/systems-designer.md       ← genre-agnostic language
+.claude/agents/economy-designer.md       ← genre-agnostic language
+.claude/agents/live-ops-designer.md      ← genre-agnostic language
+```
+
+---
+
+### Files: Merge Carefully
+
+No files require manual merging in this release. All changes are to infrastructure files with no user content.
+
+---
+
+### After Upgrading
+
+1. Run `/skill-test catalog` to verify all skills are indexed.
+2. Run `/skill-test lint [skill-name]` after any skill edits to check structural compliance.
+3. If you've customized any team-* skills, review the updated versions — no-argument guard and `Verdict:` keywords are now required for all team-* skills.
+
+---
+
+## v0.3.0 → v0.4.0
+
+**Released:** 2026-03-21
+**Commit range:** `b1cad29..HEAD`
+**Key themes:** Full UX/UI pipeline, complete story lifecycle, brownfield adoption, comprehensive QA/testing framework, pipeline integrity, 29 new skills
+
+### What Changed
+
+| Category | Changes |
+|----------|---------|
+| **New skills (17)** | `/ux-design`, `/ux-review`, `/help`, `/quick-design`, `/review-all-gdds`, `/story-readiness`, `/story-done`, `/sprint-status`, `/adopt`, `/create-architecture`, `/create-control-manifest`, `/create-epics`, `/create-stories`, `/dev-story`, `/propagate-design-change`, `/content-audit`, `/architecture-review` |
+| **New skills QA (12)** | `/qa-plan`, `/smoke-check`, `/soak-test`, `/regression-suite`, `/test-setup`, `/test-helpers`, `/test-evidence-review`, `/test-flakiness`, `/skill-test`, `/bug-triage`, `/team-live-ops`, `/team-qa` |
+| **New hooks (4)** | `log-agent-stop.sh` — agent audit trail stop; `notify.sh` — Windows toast notifications; `post-compact.sh` — session recovery reminder after compaction; `validate-skill-change.sh` — advises `/skill-test` after skill edits |
+| **New templates (8)** | `ux-spec.md`, `hud-design.md`, `accessibility-requirements.md`, `interaction-pattern-library.md`, `player-journey.md`, `difficulty-curve.md`, and 2 adoption plan templates |
+| **New infrastructure** | `workflow-catalog.yaml` (7-phase pipeline, read by `/help`), `docs/architecture/tr-registry.yaml` (stable TR-IDs), `production/sprint-status.yaml` schema |
+| **Skill updates** | `/gate-check` — 3 gates now require UX artifacts; Pre-Production gate requires vertical slice (HARD gate) |
+| **Skill updates** | `/sprint-plan` — writes `sprint-status.yaml`; `/sprint-status` reads it |
+| **Skill updates** | `/story-done` — 8-phase completion review, updates story file, surfaces next ready story |
+| **Skill updates** | `/design-review` — removed architecture gap check (wrong stage) |
+| **Skill updates** | `/team-ui` — full UX pipeline (ux-design → ux-review → team phases) |
+| **Agent updates** | 14 specialist agents — `memory: project` added |
+| **Agent updates** | `prototyper` — `isolation: worktree` (throwaway work in isolated git branch) |
+| **Model routing** | Haiku/Sonnet/Opus tier assignments documented in coordination rules; skills declare their tier in frontmatter |
+| **Directory CLAUDE.md** | Scaffolded `design/CLAUDE.md`, `src/CLAUDE.md`, `docs/CLAUDE.md` — path-scoped instructions for each directory |
+| **Pipeline integrity** | TR-ID stability, manifest versioning, ADR status gates, TR-ID reference not quote |
+| **GDD template** | `## Game Feel` section added (input responsiveness, animation targets, impact moments) |
+
+---
+
+### Files: Safe to Overwrite
+
+**New files to add:**
+```
+.claude/skills/ux-design/SKILL.md
+.claude/skills/ux-review/SKILL.md
+.claude/skills/help/SKILL.md
+.claude/skills/quick-design/SKILL.md
+.claude/skills/review-all-gdds/SKILL.md
+.claude/skills/story-readiness/SKILL.md
+.claude/skills/story-done/SKILL.md
+.claude/skills/sprint-status/SKILL.md
+.claude/skills/adopt/SKILL.md
+.claude/skills/create-architecture/SKILL.md
+.claude/skills/create-control-manifest/SKILL.md
+.claude/skills/create-epics/SKILL.md
+.claude/skills/create-stories/SKILL.md
+.claude/skills/dev-story/SKILL.md
+.claude/skills/propagate-design-change/SKILL.md
+.claude/skills/content-audit/SKILL.md
+.claude/skills/architecture-review/SKILL.md
+.claude/skills/qa-plan/SKILL.md
+.claude/skills/smoke-check/SKILL.md
+.claude/skills/soak-test/SKILL.md
+.claude/skills/regression-suite/SKILL.md
+.claude/skills/test-setup/SKILL.md
+.claude/skills/test-helpers/SKILL.md
+.claude/skills/test-evidence-review/SKILL.md
+.claude/skills/test-flakiness/SKILL.md
+.claude/skills/skill-test/SKILL.md
+.claude/skills/bug-triage/SKILL.md
+.claude/skills/team-live-ops/SKILL.md
+.claude/skills/team-qa/SKILL.md
+.claude/hooks/log-agent-stop.sh
+.claude/hooks/notify.sh
+.claude/hooks/post-compact.sh
+.claude/hooks/validate-skill-change.sh
+.claude/docs/workflow-catalog.yaml
+.claude/docs/templates/ux-spec.md
+.claude/docs/templates/hud-design.md
+.claude/docs/templates/accessibility-requirements.md
+.claude/docs/templates/interaction-pattern-library.md
+.claude/docs/templates/player-journey.md
+.claude/docs/templates/difficulty-curve.md
+design/CLAUDE.md
+src/CLAUDE.md
+docs/CLAUDE.md
+```
+
+**Existing files to overwrite (no user content):**
+```
+.claude/skills/gate-check/SKILL.md
+.claude/skills/sprint-plan/SKILL.md
+.claude/skills/sprint-status/SKILL.md
+.claude/skills/design-review/SKILL.md
+.claude/skills/team-ui/SKILL.md
+.claude/skills/story-readiness/SKILL.md
+.claude/skills/story-done/SKILL.md
+.claude/docs/templates/game-design-document.md    ← adds Game Feel section
+README.md
+docs/WORKFLOW-GUIDE.md
+UPGRADING.md
+```
+
+**Agent files to overwrite** (if you haven't written custom prompts into them):
+```
+.claude/agents/prototyper.md         ← adds isolation: worktree
+.claude/agents/art-director.md       ← adds memory: project
+.claude/agents/audio-director.md     ← adds memory: project
+.claude/agents/economy-designer.md   ← adds memory: project
+.claude/agents/game-designer.md      ← adds memory: project
+.claude/agents/gameplay-programmer.md ← adds memory: project
+.claude/agents/lead-programmer.md    ← adds memory: project
+.claude/agents/level-designer.md     ← adds memory: project
+.claude/agents/narrative-director.md ← adds memory: project
+.claude/agents/systems-designer.md   ← adds memory: project
+.claude/agents/technical-artist.md   ← adds memory: project
+.claude/agents/ui-programmer.md      ← adds memory: project
+.claude/agents/ux-designer.md        ← adds memory: project
+.claude/agents/world-builder.md      ← adds memory: project
+```
+
+---
+
+### Files: Merge Carefully
+
+#### `.claude/settings.json`
+
+Four new hooks are registered in this version. If you haven't customized `settings.json`, overwriting is safe. Otherwise, add the following hook entries manually:
+
+- `log-agent-stop.sh` — `SubagentStop` event (agent audit trail stop)
+- `notify.sh` — `Notification` event (Windows toast notification)
+- `post-compact.sh` — `PostCompact` event (session recovery reminder)
+- `validate-skill-change.sh` — `PostToolUse` event filtered to `.claude/skills/` writes
+
+#### Customized agent files
+
+If you've added project-specific knowledge to agent `.md` files, do a diff and manually add the `memory: project` line to the YAML frontmatter where appropriate. Creative and technical director agents intentionally keep `memory: user` — only specialist agents get `memory: project`.
+
+---
+
+### New Features
+
+#### Complete Story Lifecycle
+
+Stories now have a formal lifecycle enforced by two skills:
+
+- **`/story-readiness`** — validates a story is implementation-ready before a developer picks it up. Checks Design (GDD req linked), Architecture (ADR accepted), Scope (criteria testable), and DoD (manifest version current). Verdict: READY / NEEDS WORK / BLOCKED.
+- **`/story-done`** — 8-phase completion review after implementation. Verifies each acceptance criterion, checks for GDD/ADR deviations, prompts code review, updates the story file to `Status: Complete`, and surfaces the next ready story.
+
+Flow: `/story-readiness` → implement → `/story-done` → next story
+
+#### Full UX/UI Pipeline
+
+- **`/ux-design`** — guided section-by-section UX spec authoring. Three modes: screen/flow, HUD, or interaction pattern library. Reads GDD UI requirements and player journey. Output to `design/ux/`.
+- **`/ux-review`** — validates UX specs against GDD alignment, accessibility tier, and pattern library. Verdict: APPROVED / NEEDS REVISION / MAJOR REVISION.
+- **`/team-ui`** updated: Phase 1 now runs `/ux-design` + `/ux-review` as a hard gate before visual design begins.
+
+#### Brownfield Adoption
+
+**`/adopt`** onboards existing projects to the template format. Audits internal structure of GDDs, ADRs, stories, systems-index, and infra. Classifies gaps (BLOCKING/HIGH/MEDIUM/LOW). Builds an ordered migration plan. Never regenerates existing artifacts — only fills gaps.
+
+Argument modes: `full | gdds | adrs | stories | infra`
+
+Also: `/design-system retrofit [path]` and `/architecture-decision retrofit [path]` detect existing files and add only missing sections.
+
+#### Sprint Tracking YAML
+
+`production/sprint-status.yaml` is now the authoritative story tracking format:
+- Written by `/sprint-plan` (initializes all stories) and `/story-done` (sets status to `done`)
+- Read by `/sprint-status` (fast snapshot) and `/help` (per-story status in production phase)
+- Status values: `backlog | ready-for-dev | in-progress | review | done | blocked`
+- Falls back gracefully to markdown scanning if file doesn't exist
+
+#### `/help` — Context-Aware Next Step
+
+`/help` reads your current stage and in-progress work, checks which artifacts are complete, and tells you exactly what to do next — one primary required step, plus optional opportunities. Distinct from `/start` (first-time only) and `/project-stage-detect` (full audit).
+
+#### Comprehensive QA and Testing Framework
+
+Nine new QA/testing skills covering the full testing lifecycle:
+
+- **`/test-setup`** — scaffolds the test framework and CI/CD pipeline for your engine
+- **`/test-helpers`** — generates engine-specific test helper libraries (GDUnit4, NUnit, etc.)
+- **`/qa-plan`** — generates a QA test plan for a sprint or feature, classifying stories by test type
+- **`/smoke-check`** — runs the critical path smoke test gate before QA hand-off
+- **`/soak-test`** — generates a soak test protocol for extended play sessions (stability, memory leaks)
+- **`/regression-suite`** — maps test coverage to GDD critical paths, identifies fixed bugs lacking regression tests
+- **`/test-evidence-review`** — quality review of test files and manual evidence documents
+- **`/test-flakiness`** — detects non-deterministic tests by reading CI run logs
+- **`/skill-test`** — validates skill files for structural compliance and behavioral correctness (three modes: lint, spec, catalog)
+
+Also new: **`/bug-triage`** re-evaluates all open bugs for priority, severity, and ownership.
+
+#### Skill Validator (`/skill-test`)
+
+`/skill-test` is a meta-skill for validating the harness itself. Run it after editing any skill file. Three modes:
+- `lint` — validates YAML frontmatter and required fields
+- `spec [skill-name]` — runs behavioral spec tests against a specific skill
+- `catalog` — checks that all skills in `.claude/skills/` are indexed in the catalog
+
+The new `validate-skill-change.sh` hook reminds you to run `/skill-test` automatically when a skill file is modified.
+
+#### Team Live-Ops and Team QA Orchestration
+
+- **`/team-live-ops`** — coordinates live-ops-designer + economy-designer + community-manager + analytics-engineer for post-launch content planning (seasonal events, battle pass, retention)
+- **`/team-qa`** — orchestrates qa-lead + qa-tester + gameplay-programmer + producer through a full QA cycle: strategy, execution, coverage, and sign-off
+
+#### Model Tier Routing
+
+Skills are now explicitly assigned to Haiku, Sonnet, or Opus tiers based on task complexity. Read-only status checks use Haiku; complex multi-document synthesis uses Opus; everything else defaults to Sonnet. Tier assignments are documented in `.claude/docs/coordination-rules.md`.
+
+#### Directory CLAUDE.md Files
+
+Three new directory-scoped CLAUDE.md files (`design/`, `src/`, `docs/`) provide path-specific instructions to agents working in those directories. These load automatically when Claude Code reads files in that directory.
+
+---
+
+### After Upgrading
+
+1. **Verify new hooks** are registered in `.claude/settings.json` — check for all four: `log-agent-stop.sh`, `notify.sh`, `post-compact.sh`, `validate-skill-change.sh`.
+
+2. **Test the audit trail** by spawning any subagent — both start and stop events should appear in `production/session-logs/`.
+
+3. **Generate sprint-status.yaml** if you're in active production:
+   ```
+   /sprint-plan status
+   ```
+
+4. **Run `/adopt`** if you have existing GDDs or ADRs that predate this template version — it will identify which sections need to be added without overwriting your content.
+
+5. **Validate your skills** after any skill edits with `/skill-test` — the new `validate-skill-change.sh` hook will automatically remind you to do this.
 
 ---
 

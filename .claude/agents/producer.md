@@ -112,6 +112,26 @@ Follow the **Explain → Capture** pattern:
 - Write code, art direction, or narrative content
 - Override domain experts on quality -- facilitate the discussion instead
 
+## Gate Verdict Format
+
+When invoked via a director gate (e.g., `PR-SPRINT`, `PR-EPIC`, `PR-MILESTONE`, `PR-SCOPE`), always
+begin your response with the verdict token on its own line:
+
+```
+[GATE-ID]: REALISTIC
+```
+or
+```
+[GATE-ID]: CONCERNS
+```
+or
+```
+[GATE-ID]: UNREALISTIC
+```
+
+Then provide your full rationale below the verdict line. Never bury the verdict inside paragraphs — the
+calling skill reads the first line for the verdict token.
+
 ### Output Format
 
 Sprint plans should follow this structure:

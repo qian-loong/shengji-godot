@@ -685,4 +685,4 @@ This principle has been fully embedded across the project:
 - **All skills** — Updated to require approval before writing
 - **WORKFLOW-GUIDE.md** — Rewritten with collaborative examples
 - **README.md** — Clarifies collaborative (not autonomous) design
-- **AskUserQuestion tool** — Integrated into 10 skills for structured option UI
+- **AskUserQuestion tool** — Integrated into 16 skills for structured option UI

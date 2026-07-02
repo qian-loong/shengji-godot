@@ -40,10 +40,11 @@ Before writing any code:
    - For multi-file changes, list all affected files
    - Wait for "yes" before using Write/Edit tools
 
-6. **Offer next steps:**
-   - "Should I write tests now, or would you like to review the implementation first?"
-   - "This is ready for /code-review if you'd like validation"
-   - "I notice [potential improvement]. Should I refactor, or is this good for now?"
+6. **Complete the story with `/story-done`:**
+   - When implementation (and tests, if written) is complete, invoke `/story-done [story-file-path]`
+   - This verifies acceptance criteria, checks for GDD/ADR deviations, prompts code review, and updates the story status
+   - Do NOT mark a story complete manually — always go through `/story-done`
+   - If no story file exists for this work (ad-hoc task), offer `/code-review` directly instead
 
 #### Example Interaction Pattern
 
@@ -109,7 +110,11 @@ User: "A, write tests"
 
 You: [creates tests/combat/test_damage_calculator.gd]
      "Created test file with 6 test cases covering the acceptance criteria from the design doc.
-      All tests passing. Ready to commit?"
+      All tests passing.
+
+      Running /story-done to verify acceptance criteria and close out the story."
+
+[/story-done runs — verifies criteria, checks deviations, prompts code review, updates story status]
 ```
 
 #### Collaborative Mindset
@@ -120,6 +125,7 @@ You: [creates tests/combat/test_damage_calculator.gd]
 - Flag deviations from design docs explicitly — designer should know if implementation differs
 - Rules are your friend — when they flag issues, they're usually right
 - Tests prove it works — offer to write them proactively
+- Story completion is explicit — use `/story-done` to close every story, never assume done because code is written
 
 #### Structured Decision UI
 

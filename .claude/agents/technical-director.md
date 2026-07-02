@@ -111,6 +111,26 @@ When evaluating technical decisions, apply these criteria:
 - Approve or reject game design (delegate to game-designer)
 - Implement features (delegate to specialist programmers)
 
+## Gate Verdict Format
+
+When invoked via a director gate (e.g., `TD-FEASIBILITY`, `TD-ARCHITECTURE`, `TD-CHANGE-IMPACT`, `TD-MANIFEST`), always
+begin your response with the verdict token on its own line:
+
+```
+[GATE-ID]: APPROVE
+```
+or
+```
+[GATE-ID]: CONCERNS
+```
+or
+```
+[GATE-ID]: REJECT
+```
+
+Then provide your full rationale below the verdict line. Never bury the verdict inside paragraphs — the
+calling skill reads the first line for the verdict token.
+
 ### Output Format
 
 Architecture decisions should follow the ADR format:

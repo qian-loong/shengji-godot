@@ -3,18 +3,19 @@
   <p align="center">
     Turn a single Claude Code session into a full game development studio.
     <br />
-    48 agents. 37 workflows. One coordinated AI team.
+    49 agents. 73 skills. One coordinated AI team.
   </p>
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
-  <a href=".claude/agents"><img src="https://img.shields.io/badge/agents-48-blueviolet" alt="48 Agents"></a>
-  <a href=".claude/skills"><img src="https://img.shields.io/badge/skills-37-green" alt="37 Skills"></a>
-  <a href=".claude/hooks"><img src="https://img.shields.io/badge/hooks-8-orange" alt="8 Hooks"></a>
+  <a href=".claude/agents"><img src="https://img.shields.io/badge/agents-49-blueviolet" alt="49 Agents"></a>
+  <a href=".claude/skills"><img src="https://img.shields.io/badge/skills-73-green" alt="73 Skills"></a>
+  <a href=".claude/hooks"><img src="https://img.shields.io/badge/hooks-12-orange" alt="12 Hooks"></a>
   <a href=".claude/rules"><img src="https://img.shields.io/badge/rules-11-red" alt="11 Rules"></a>
   <a href="https://docs.anthropic.com/en/docs/claude-code"><img src="https://img.shields.io/badge/built%20for-Claude%20Code-f5f5f5?logo=anthropic" alt="Built for Claude Code"></a>
-  <a href="https://ko-fi.com/donchitos"><img src="https://img.shields.io/badge/Ko--fi-Support%20this%20project-ff5e5b?logo=ko-fi&logoColor=white" alt="Ko-fi"></a>
+  <a href="https://www.buymeacoffee.com/donchitos3"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Support%20this%20project-FFDD00?logo=buymeacoffee&logoColor=black" alt="Buy Me a Coffee"></a>
+  <a href="https://github.com/sponsors/Donchitos"><img src="https://img.shields.io/badge/GitHub%20Sponsors-Support%20this%20project-ea4aaa?logo=githubsponsors&logoColor=white" alt="GitHub Sponsors"></a>
 </p>
 
 ---
@@ -23,7 +24,7 @@
 
 Building a game solo with AI is powerful — but a single chat session has no structure. No one stops you from hardcoding magic numbers, skipping design docs, or writing spaghetti code. There's no QA pass, no design review, no one asking "does this actually fit the game's vision?"
 
-**Claude Code Game Studios** solves this by giving your AI session the structure of a real studio. Instead of one general-purpose assistant, you get 48 specialized agents organized into a studio hierarchy — directors who guard the vision, department leads who own their domains, and specialists who do the hands-on work. Each agent has defined responsibilities, escalation paths, and quality gates.
+**Claude Code Game Studios** solves this by giving your AI session the structure of a real studio. Instead of one general-purpose assistant, you get 49 specialized agents organized into a studio hierarchy — directors who guard the vision, department leads who own their domains, and specialists who do the hands-on work. Each agent has defined responsibilities, escalation paths, and quality gates.
 
 The result: you still make every decision, but now you have a team that asks the right questions, catches mistakes early, and keeps your project organized from first brainstorm to launch.
 
@@ -42,6 +43,7 @@ The result: you still make every decision, but now you have a team that asks the
 - [Customization](#customization)
 - [Platform Support](#platform-support)
 - [Community](#community)
+- [Supporting This Project](#supporting-this-project)
 - [License](#license)
 
 ---
@@ -50,11 +52,11 @@ The result: you still make every decision, but now you have a team that asks the
 
 | Category | Count | Description |
 |----------|-------|-------------|
-| **Agents** | 48 | Specialized subagents across design, programming, art, audio, narrative, QA, and production |
-| **Skills** | 37 | Slash commands for common workflows (`/start`, `/sprint-plan`, `/code-review`, `/brainstorm`, etc.) |
-| **Hooks** | 8 | Automated validation on commits, pushes, asset changes, session lifecycle, agent audit, and gap detection |
+| **Agents** | 49 | Specialized subagents across design, programming, art, audio, narrative, QA, and production |
+| **Skills** | 73 | Slash commands for every workflow phase (`/start`, `/design-system`, `/create-epics`, `/create-stories`, `/dev-story`, `/story-done`, etc.) |
+| **Hooks** | 12 | Automated validation on commits, pushes, asset changes, session lifecycle, agent audit trail, and gap detection |
 | **Rules** | 11 | Path-scoped coding standards enforced when editing gameplay, engine, AI, UI, network code, and more |
-| **Templates** | 29 | Document templates for GDDs, ADRs, sprint plans, economy models, faction design, and more |
+| **Templates** | 41 | Document templates for GDDs, UX specs, ADRs, sprint plans, HUD design, accessibility, and more |
 
 ## Studio Hierarchy
 
@@ -92,25 +94,43 @@ The template includes agent sets for all three major engines. Use the set that m
 
 ## Slash Commands
 
-Type `/` in Claude Code to access all 37 skills:
+Type `/` in Claude Code to access all 73 skills:
+
+**Onboarding & Navigation**
+`/start` `/help` `/project-stage-detect` `/setup-engine` `/adopt`
+
+**Game Design**
+`/brainstorm` `/map-systems` `/design-system` `/quick-design` `/review-all-gdds` `/propagate-design-change`
+
+**Art & Assets**
+`/art-bible` `/asset-spec` `/asset-audit`
+
+**UX & Interface Design**
+`/ux-design` `/ux-review`
+
+**Architecture**
+`/create-architecture` `/architecture-decision` `/architecture-review` `/create-control-manifest`
+
+**Stories & Sprints**
+`/create-epics` `/create-stories` `/dev-story` `/sprint-plan` `/sprint-status` `/story-readiness` `/story-done` `/estimate`
 
 **Reviews & Analysis**
-`/design-review` `/code-review` `/balance-check` `/asset-audit` `/scope-check` `/perf-profile` `/tech-debt`
+`/design-review` `/code-review` `/balance-check` `/content-audit` `/scope-check` `/perf-profile` `/tech-debt` `/gate-check` `/consistency-check` `/security-audit`
+
+**QA & Testing**
+`/qa-plan` `/smoke-check` `/soak-test` `/regression-suite` `/test-setup` `/test-helpers` `/test-evidence-review` `/test-flakiness` `/skill-test` `/skill-improve`
 
 **Production**
-`/sprint-plan` `/milestone-review` `/estimate` `/retrospective` `/bug-report`
-
-**Project Management**
-`/start` `/project-stage-detect` `/reverse-document` `/gate-check` `/map-systems` `/design-system`
+`/milestone-review` `/retrospective` `/bug-report` `/bug-triage` `/reverse-document` `/playtest-report`
 
 **Release**
-`/release-checklist` `/launch-checklist` `/changelog` `/patch-notes` `/hotfix`
+`/release-checklist` `/launch-checklist` `/changelog` `/patch-notes` `/hotfix` `/day-one-patch`
 
-**Creative**
-`/brainstorm` `/playtest-report` `/prototype` `/onboard` `/localize`
+**Creative & Content**
+`/prototype` `/onboard` `/localize`
 
 **Team Orchestration** (coordinate multiple agents on a single feature)
-`/team-combat` `/team-narrative` `/team-ui` `/team-release` `/team-polish` `/team-audio` `/team-level`
+`/team-combat` `/team-narrative` `/team-ui` `/team-release` `/team-polish` `/team-audio` `/team-level` `/team-live-ops` `/team-qa`
 
 ## Getting Started
 
@@ -155,21 +175,19 @@ versions, and which files are safe to overwrite vs. which need a manual merge.
 CLAUDE.md                           # Master configuration
 .claude/
   settings.json                     # Hooks, permissions, safety rules
-  agents/                           # 48 agent definitions (markdown + YAML frontmatter)
-  skills/                           # 37 slash commands (subdirectory per skill)
-  hooks/                            # 8 hook scripts (bash, cross-platform)
+  agents/                           # 49 agent definitions (markdown + YAML frontmatter)
+  skills/                           # 73 slash commands (subdirectory per skill)
+  hooks/                            # 12 hook scripts (bash, cross-platform)
   rules/                            # 11 path-scoped coding standards
+  statusline.sh                     # Status line script (context%, model, stage, epic breadcrumb)
   docs/
-    quick-start.md                  # Detailed usage guide
-    agent-roster.md                 # Full agent table with domains
-    agent-coordination-map.md       # Delegation and escalation paths
-    setup-requirements.md           # Prerequisites and platform notes
-    templates/                      # 28 document templates
+    workflow-catalog.yaml           # 7-phase pipeline definition (read by /help)
+    templates/                      # 41 document templates
 src/                                # Game source code
 assets/                             # Art, audio, VFX, shaders, data files
 design/                             # GDDs, narrative docs, level designs
 docs/                               # Technical documentation and ADRs
-tests/                              # Test suites
+tests/                              # Test suites (unit, integration, performance, playtest)
 tools/                              # Build and pipeline tools
 prototypes/                         # Throwaway prototypes (isolated from src/)
 production/                         # Sprint plans, milestones, release tracking
@@ -205,14 +223,20 @@ You stay in control. The agents provide structure and expertise, not autonomy.
 
 | Hook | Trigger | What It Does |
 |------|---------|--------------|
-| `validate-commit.sh` | `git commit` | Checks for hardcoded values, TODO format, JSON validity, design doc sections |
-| `validate-push.sh` | `git push` | Warns on pushes to protected branches |
-| `validate-assets.sh` | File writes in `assets/` | Validates naming conventions and JSON structure |
-| `session-start.sh` | Session open | Loads sprint context and recent git activity |
-| `detect-gaps.sh` | Session open | Detects fresh projects (suggests `/start`) and missing documentation when code/prototypes exist |
-| `pre-compact.sh` | Context compression | Preserves session progress notes |
-| `session-stop.sh` | Session close | Logs accomplishments |
-| `log-agent.sh` | Agent spawned | Audit trail of all subagent invocations |
+| `validate-commit.sh` | PreToolUse (Bash) | Checks for hardcoded values, TODO format, JSON validity, design doc sections — exits early if the command is not `git commit` |
+| `validate-push.sh` | PreToolUse (Bash) | Warns on pushes to protected branches — exits early if the command is not `git push` |
+| `validate-assets.sh` | PostToolUse (Write/Edit) | Validates naming conventions and JSON structure — exits early if the file is not in `assets/` |
+| `session-start.sh` | Session open | Shows current branch and recent commits for orientation |
+| `detect-gaps.sh` | Session open | Detects fresh projects (suggests `/start`) and missing design docs when code or prototypes exist |
+| `pre-compact.sh` | Before compaction | Preserves session progress notes |
+| `post-compact.sh` | After compaction | Reminds Claude to restore session state from `active.md` |
+| `notify.sh` | Notification event | Shows Windows toast notification via PowerShell |
+| `session-stop.sh` | Session close | Archives `active.md` to session log and records git activity |
+| `log-agent.sh` | Agent spawned | Audit trail start — logs subagent invocation |
+| `log-agent-stop.sh` | Agent stops | Audit trail stop — completes subagent record |
+| `validate-skill-change.sh` | PostToolUse (Write/Edit) | Advises running `/skill-test` after any `.claude/skills/` change |
+
+> **Note**: `validate-commit.sh`, `validate-assets.sh`, and `validate-skill-change.sh` fire on every Bash/Write tool call and exit immediately (exit 0) when the command or file path is not relevant. This is normal hook behavior — not a performance concern.
 
 **Permission rules** in `settings.json` auto-allow safe operations (git status, test runs) and block dangerous ones (force push, `rm -rf`, reading `.env` files).
 
@@ -251,10 +275,11 @@ This is a **template**, not a locked framework. Everything is meant to be custom
 - **Add rules** — create new path-scoped rules for your project's directory structure
 - **Tune hooks** — adjust validation strictness, add new checks
 - **Pick your engine** — use the Godot, Unity, or Unreal agent set (or none)
+- **Set review intensity** — `full` (all director gates), `lean` (phase gates only), or `solo` (none). Set during `/start` or edit `production/review-mode.txt`. Override per-run with `--review solo` on any skill.
 
 ## Platform Support
 
-Tested on **Windows 10** with Git Bash. All hooks use POSIX-compatible patterns (`grep -E`, not `grep -P`) and include fallbacks for missing tools. Works on macOS and Linux without modification.
+Primary development and testing on **Windows 10** with Git Bash. All hooks use POSIX-compatible patterns (`grep -E`, not `grep -P`) and include fallbacks for missing tools, so they should run on macOS and Linux. The `notify.sh` hook uses PowerShell for Windows toast notifications and is a no-op elsewhere — desktop notifications on macOS/Linux are not yet wired. Cross-platform testing is ongoing; please file issues for any platform-specific breakage.
 
 ## Community
 
@@ -263,7 +288,24 @@ Tested on **Windows 10** with Git Bash. All hooks use POSIX-compatible patterns 
 
 ---
 
-*This project is under active development. The agent architecture, skills, and coordination system are solid and usable today — but there's more coming.*
+## Supporting This Project
+
+Claude Code Game Studios is free and open source. If it saves you time or helps you ship your game, consider supporting continued development:
+
+<p>
+  <a href="https://www.buymeacoffee.com/donchitos3"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
+  &nbsp;
+  <a href="https://github.com/sponsors/Donchitos"><img src="https://img.shields.io/badge/GitHub%20Sponsors-ea4aaa?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="GitHub Sponsors"></a>
+</p>
+
+- **[Buy Me a Coffee](https://www.buymeacoffee.com/donchitos3)** — one-time support
+- **[GitHub Sponsors](https://github.com/sponsors/Donchitos)** — recurring support through GitHub
+
+Sponsorships help fund time spent maintaining skills, adding new agents, keeping up with Claude Code and engine API changes, and responding to community issues.
+
+---
+
+*Built for Claude Code. Maintained and extended — contributions welcome via [GitHub Discussions](https://github.com/Donchitos/Claude-Code-Game-Studios/discussions).*
 
 ## License
 

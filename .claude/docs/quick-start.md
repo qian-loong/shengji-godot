@@ -3,7 +3,7 @@
 ## What Is This?
 
 This is a complete Claude Code agent architecture for game development. It
-organizes 48 specialized AI agents into a studio hierarchy that mirrors
+organizes 49 specialized AI agents into a studio hierarchy that mirrors
 real game development teams, with defined responsibilities, delegation
 rules, and coordination protocols. It includes engine-specialist agents
 for Godot, Unity, and Unreal — each with dedicated sub-specialists for
@@ -65,6 +65,7 @@ Ask yourself: "What department would handle this in a real studio?"
 | Manage Addressable assets | `unity-addressables-specialist` |
 | Build UI Toolkit/UGUI screens | `unity-ui-specialist` |
 | Write idiomatic GDScript | `godot-gdscript-specialist` |
+| Write Godot C# code | `godot-csharp-specialist` |
 | Create Godot shaders | `godot-shader-specialist` |
 | Build GDExtension modules | `godot-gdextension-specialist` |
 | Plan live events and seasons | `live-ops-designer` |
@@ -76,31 +77,58 @@ Ask yourself: "What department would handle this in a real studio?"
 | Command | What it does |
 |---------|-------------|
 | `/start` | First-time onboarding — asks where you are, guides you to the right workflow |
-| `/design-review` | Reviews a design document |
-| `/code-review` | Reviews code for quality and architecture |
-| `/playtest-report` | Creates or analyzes playtest feedback |
-| `/balance-check` | Analyzes game balance data |
-| `/sprint-plan` | Creates or updates sprint plans |
-| `/architecture-decision` | Creates an ADR |
-| `/asset-audit` | Audits assets for compliance |
-| `/milestone-review` | Reviews milestone progress |
-| `/onboard` | Generates onboarding docs for a role |
-| `/prototype` | Scaffolds a throwaway prototype |
-| `/release-checklist` | Validates pre-release checklist |
-| `/changelog` | Generates changelog from git history |
-| `/retrospective` | Runs sprint/milestone retrospective |
-| `/estimate` | Produces structured effort estimates |
-| `/hotfix` | Emergency fix with audit trail |
-| `/tech-debt` | Scan, track, and prioritize tech debt |
-| `/scope-check` | Detect scope creep against plan |
-| `/localize` | Localization scan, extract, validate |
-| `/perf-profile` | Performance profiling and bottleneck ID |
-| `/gate-check` | Validate phase readiness (PASS/CONCERNS/FAIL) |
+| `/help` | Context-aware "what do I do next?" — reads your current phase and artifacts |
 | `/project-stage-detect` | Analyze project state, detect stage, identify gaps |
-| `/reverse-document` | Generate design/architecture docs from existing code |
 | `/setup-engine` | Configure engine + version, populate reference docs |
+| `/adopt` | Brownfield audit and migration plan for existing projects |
+| `/brainstorm` | Guided game concept ideation from scratch |
 | `/map-systems` | Decompose concept into systems, map dependencies, guide per-system GDDs |
 | `/design-system` | Guided, section-by-section GDD authoring for a single game system |
+| `/quick-design` | Lightweight spec for small changes — tuning, tweaks, minor additions |
+| `/review-all-gdds` | Cross-GDD consistency and game design theory review |
+| `/propagate-design-change` | Find ADRs and stories affected by a GDD change |
+| `/art-bible` | Guided, section-by-section Art Bible authoring — creates visual identity spec before asset production |
+| `/asset-spec` | Generate per-asset visual specifications and AI generation prompts from GDDs or character profiles |
+| `/ux-design` | Author UX specs (screen/flow, HUD, interaction patterns) |
+| `/ux-review` | Validate UX specs for accessibility and GDD alignment |
+| `/create-architecture` | Master architecture document for the game |
+| `/architecture-decision` | Creates an ADR |
+| `/architecture-review` | Validate all ADRs, dependency ordering, GDD traceability |
+| `/create-control-manifest` | Flat programmer rules sheet from Accepted ADRs |
+| `/create-epics` | Translate GDDs + ADRs into epics (one per architectural module) |
+| `/create-stories` | Break a single epic into implementable story files |
+| `/dev-story` | Read a story and implement it — routes to the correct programmer agent |
+| `/sprint-plan` | Creates or updates sprint plans |
+| `/sprint-status` | Quick 30-line sprint snapshot |
+| `/story-readiness` | Validate a story is implementation-ready before pickup |
+| `/story-done` | End-of-story completion review — verifies acceptance criteria |
+| `/estimate` | Produces structured effort estimates |
+| `/design-review` | Reviews a design document |
+| `/code-review` | Reviews code for quality and architecture |
+| `/balance-check` | Analyzes game balance data |
+| `/asset-audit` | Audits assets for compliance |
+| `/content-audit` | GDD-specified content vs. implemented — find gaps |
+| `/scope-check` | Detect scope creep against plan |
+| `/perf-profile` | Performance profiling and bottleneck ID |
+| `/tech-debt` | Scan, track, and prioritize tech debt |
+| `/gate-check` | Validate phase readiness (PASS/CONCERNS/FAIL) |
+| `/consistency-check` | Scan all GDDs for cross-document inconsistencies (conflicting stats, names, rules) |
+| `/security-audit` | Audit for security vulnerabilities: save tampering, cheat vectors, network exploits, data exposure |
+| `/reverse-document` | Generate design/architecture docs from existing code |
+| `/milestone-review` | Reviews milestone progress |
+| `/retrospective` | Runs sprint/milestone retrospective |
+| `/bug-report` | Structured bug report creation |
+| `/playtest-report` | Creates or analyzes playtest feedback |
+| `/onboard` | Generates onboarding docs for a role |
+| `/release-checklist` | Validates pre-release checklist |
+| `/launch-checklist` | Complete launch readiness validation |
+| `/changelog` | Generates changelog from git history |
+| `/patch-notes` | Generate player-facing patch notes |
+| `/hotfix` | Emergency fix with audit trail |
+| `/day-one-patch` | Prepare a focused day-one patch for known issues discovered after gold master |
+| `/prototype` | Concept prototype — validate core idea before writing GDDs (Phase 1) |
+| `/vertical-slice` | Production-quality end-to-end build — validate full game loop (Phase 4) |
+| `/localize` | Localization scan, extract, validate |
 | `/team-combat` | Orchestrate full combat team pipeline |
 | `/team-narrative` | Orchestrate full narrative team pipeline |
 | `/team-ui` | Orchestrate full UI team pipeline |
@@ -108,9 +136,19 @@ Ask yourself: "What department would handle this in a real studio?"
 | `/team-polish` | Orchestrate full polish team pipeline |
 | `/team-audio` | Orchestrate full audio team pipeline |
 | `/team-level` | Orchestrate full level creation pipeline |
-| `/launch-checklist` | Complete launch readiness validation |
-| `/patch-notes` | Generate player-facing patch notes |
-| `/brainstorm` | Guided game concept ideation from scratch |
+| `/team-live-ops` | Orchestrate live-ops team for seasons, events, and post-launch content |
+| `/team-qa` | Orchestrate full QA team cycle — test plan, test cases, smoke check, sign-off |
+| `/qa-plan` | Generate a QA test plan for a sprint or feature |
+| `/bug-triage` | Re-prioritize open bugs, assign to sprints, surface systemic trends |
+| `/smoke-check` | Run critical path smoke test gate before QA hand-off (PASS/FAIL) |
+| `/soak-test` | Generate a soak test protocol for extended play sessions |
+| `/regression-suite` | Map coverage to GDD critical paths, flag gaps, maintain regression suite |
+| `/test-setup` | Scaffold test framework + CI pipeline for the project's engine (run once) |
+| `/test-helpers` | Generate engine-specific test helper libraries and factory functions |
+| `/test-flakiness` | Detect flaky tests from CI history, flag for quarantine or fix |
+| `/test-evidence-review` | Quality review of test files and manual evidence — ADEQUATE/INCOMPLETE/MISSING |
+| `/skill-test` | Validate skill files for compliance and correctness (static / spec / audit) |
+| `/skill-improve` | Improve a skill using a test-fix-retest loop — diagnose, propose fix, rewrite, verify |
 
 ### 4. Use Templates for New Documents
 
@@ -118,6 +156,7 @@ Templates are in `.claude/docs/templates/`:
 
 - `game-design-document.md` -- for new mechanics and systems
 - `architecture-decision-record.md` -- for technical decisions
+- `architecture-traceability.md` -- maps GDD requirements to ADRs to story IDs
 - `risk-register-entry.md` -- for new risks
 - `narrative-character-sheet.md` -- for new characters
 - `test-plan.md` -- for feature test plans
@@ -142,6 +181,19 @@ Templates are in `.claude/docs/templates/`:
 - `design-doc-from-implementation.md` -- for reverse-documenting existing code into GDDs
 - `architecture-doc-from-code.md` -- for reverse-documenting code into architecture docs
 - `concept-doc-from-prototype.md` -- for reverse-documenting prototypes into concept docs
+- `ux-spec.md` -- for per-screen UX specifications (layout zones, states, events)
+- `hud-design.md` -- for whole-game HUD philosophy, zones, and element specs
+- `accessibility-requirements.md` -- for project-wide accessibility tier and feature matrix
+- `interaction-pattern-library.md` -- for standard UI controls and game-specific patterns
+- `player-journey.md` -- for 6-phase emotional arc and retention hooks by time scale
+- `difficulty-curve.md` -- for difficulty axes, onboarding ramp, and cross-system interactions
+- `test-evidence.md` -- template for recording manual test evidence (screenshots, walkthrough notes)
+
+Also in `.claude/docs/templates/collaborative-protocols/` (used by agents, not typically edited directly):
+
+- `design-agent-protocol.md` -- question-options-draft-approval cycle for design agents
+- `implementation-agent-protocol.md` -- story pickup through /story-done cycle for programming agents
+- `leadership-agent-protocol.md` -- cross-department delegation and escalation for director-tier agents
 
 ### 5. Follow the Coordination Rules
 
@@ -174,9 +226,9 @@ If you already know what you need, jump directly to the relevant path:
 4. **Decompose into systems** — Run `/map-systems` to map all systems and dependencies
 5. **Design each system** — Run `/design-system [system-name]` (or `/map-systems next`)
    to write GDDs in dependency order
-6. **Test the core loop** — Run `/prototype [core-mechanic]`
-7. **Playtest it** — Run `/playtest-report` to validate the hypothesis
-8. **Plan the first sprint** — Run `/sprint-plan new`
+6. **Prototype the mechanic** — Run `/prototype [core-mechanic]` (1–3 days — before writing GDDs)
+7. **Design each system** — Run `/design-system [system-name]` to write GDDs, informed by prototype findings
+8. **Plan the first sprint** — After architecture and `/vertical-slice`, run `/sprint-plan new`
 9. Start building
 
 ### Path B: "I know what I want to build"
@@ -208,9 +260,12 @@ If you have design docs, prototypes, or code already:
 
 1. **Run `/start`** (or `/project-stage-detect`) — analyzes what exists,
    identifies gaps, and recommends next steps
-2. **Configure engine if needed** — Run `/setup-engine` if not yet configured
-3. **Validate phase readiness** — Run `/gate-check` to see where you stand
-4. **Plan the next sprint** — Run `/sprint-plan new`
+2. **Run `/adopt`** if you have existing GDDs, ADRs, or stories — audits
+   internal format compliance and builds a numbered migration plan to fill gaps
+   without overwriting your existing work
+3. **Configure engine if needed** — Run `/setup-engine` if not yet configured
+4. **Validate phase readiness** — Run `/gate-check` to see where you stand
+5. **Plan the next sprint** — Run `/sprint-plan new`
 
 ## File Structure Reference
 
@@ -218,9 +273,9 @@ If you have design docs, prototypes, or code already:
 CLAUDE.md                          -- Master config (read this first, ~60 lines)
 .claude/
   settings.json                    -- Claude Code hooks and project settings
-  agents/                          -- 48 agent definitions (YAML frontmatter)
-  skills/                          -- 37 slash command definitions (YAML frontmatter)
-  hooks/                           -- 8 hook scripts (.sh) wired by settings.json
+  agents/                          -- 49 agent definitions (YAML frontmatter)
+  skills/                          -- 73 slash command definitions (YAML frontmatter)
+  hooks/                           -- 12 hook scripts (.sh) wired by settings.json
   rules/                           -- 11 path-specific rule files
   docs/
     quick-start.md                 -- This file
@@ -228,15 +283,9 @@ CLAUDE.md                          -- Master config (read this first, ~60 lines)
     coding-standards.md            -- Coding and design doc standards
     coordination-rules.md          -- Agent coordination rules
     context-management.md          -- Context budgets and compaction instructions
-    review-workflow.md             -- Review and sign-off process
     directory-structure.md         -- Project directory layout
-    agent-roster.md                -- Full agent list with tiers
-    skills-reference.md            -- All slash commands
-    rules-reference.md             -- Path-specific rules
-    hooks-reference.md             -- Active hooks
-    agent-coordination-map.md      -- Full delegation and workflow map
+    workflow-catalog.yaml          -- 7-phase pipeline definition (read by /help)
     setup-requirements.md          -- System prerequisites (Git Bash, jq, Python)
     settings-local-template.md     -- Personal settings.local.json guide
-    hooks-reference/               -- Hook documentation and git hook examples
-    templates/                     -- 28 document templates
+    templates/                     -- 41 document templates
 ```

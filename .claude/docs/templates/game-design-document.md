@@ -3,7 +3,16 @@
 > **Status**: Draft | In Review | Approved | Implemented
 > **Author**: [Agent or person]
 > **Last Updated**: [Date]
+> **Last Verified**: [Date — when this doc was last confirmed accurate against current design]
 > **Implements Pillar**: [Which game pillar this supports]
+
+## Summary
+
+[2–3 sentences: what this system is, what it does for the player, and why it
+exists in this game. Written for tiered context loading — a skill scanning
+20 GDDs uses this section to decide whether to read further. No jargon.]
+
+> **Quick reference** — Layer: `[Foundation | Core | Feature | Presentation]` · Priority: `[MVP | Vertical Slice | Alpha | Full Vision]` · Key deps: `[System names or "None"]`
 
 ## Overview
 
@@ -91,12 +100,106 @@ value, the safe range, and what happens at the extremes.]
 | Event | Visual Feedback | Audio Feedback | Priority |
 |-------|----------------|---------------|----------|
 
+## Game Feel
+
+> **Why this section exists separately from Visual/Audio Requirements**: Visual/Audio
+> Requirements document WHAT feedback events occur (tables of events mapped to assets).
+> Game Feel documents HOW the mechanic feels to operate — the responsiveness, weight,
+> snap, and kinesthetic quality of the interaction. These are design targets for timing,
+> frame data, and physical sensation of control. Game feel must be specified at design
+> time because it drives animation budgets, input handling architecture, and hitbox
+> timing. Retrofitting feel targets after implementation is expensive and often requires
+> fundamental rework.
+
+### Feel Reference
+
+[Name a specific game, mechanic, or moment that captures the target feel. Be precise —
+cite the exact mechanic, not just the game. Explain what quality you are borrowing.
+Optionally include an anti-reference (what this should NOT feel like).]
+
+> Example: "Should feel like Dark Souls weapon swings — weighty, committed, and
+> telegraphed, but satisfying on contact. NOT floaty like early Halo melee."
+
+### Input Responsiveness
+
+[Maximum acceptable latency from player input to visible/audible response, per action.]
+
+| Action | Max Input-to-Response Latency (ms) | Frame Budget (at 60fps) | Notes |
+|--------|-----------------------------------|------------------------|-------|
+| [Primary action] | [e.g., 50ms] | [e.g., 3 frames] | |
+| [Secondary action] | | | |
+
+### Animation Feel Targets
+
+[Frame data targets for each animation in this mechanic. Startup = windup before the
+action has any effect. Active = frames when the action is "happening" (hitbox live,
+ability firing, etc.). Recovery = committed/vulnerable frames after the action resolves.]
+
+| Animation | Startup Frames | Active Frames | Recovery Frames | Feel Goal | Notes |
+|-----------|---------------|--------------|----------------|-----------|-------|
+| [e.g., Light attack] | | | | [e.g., Snappy, low commitment] | |
+| [e.g., Heavy attack] | | | | [e.g., Weighty, high commitment] | |
+
+### Impact Moments
+
+[Defines the punctuation of the mechanic — the moments of peak feedback intensity that
+make actions feel consequential. Every high-stakes event should have at least one entry.]
+
+| Impact Type | Duration (ms) | Effect Description | Configurable? |
+|-------------|--------------|-------------------|---------------|
+| Hit-stop (freeze frames) | [e.g., 80ms] | [Freeze both objects on contact] | Yes |
+| Screen shake | [e.g., 150ms] | [Directional, decaying] | Yes |
+| Camera impact | | | |
+| Controller rumble | | | |
+| Time-scale slowdown | | | |
+
+### Weight and Responsiveness Profile
+
+[A short prose description of the overall feel target. Answer the following:]
+
+- **Weight**: Does this feel heavy and deliberate, or light and reactive?
+- **Player control**: How much does the player feel in control at every moment?
+  (High control = can course-correct mid-action; Low control = committed, momentum-based)
+- **Snap quality**: Does this feel crisp and binary, or smooth and analog?
+- **Acceleration model**: Does movement/action start instantly (arcade feel) or
+  ramp up from zero (simulation feel)? Same question for deceleration.
+- **Failure texture**: When the player makes an error, does the mechanic feel fair
+  or punishing? What is the read on WHY they failed?
+
+### Feel Acceptance Criteria
+
+[Specific, testable criteria a playtester can verify without measurement instruments.
+These are subjective targets stated precisely enough to get consistent verdicts.]
+
+- [ ] [e.g., "Combat feels impactful — playtesters comment on weight unprompted"]
+- [ ] [e.g., "No reviewer uses the words 'floaty', 'slippery', or 'unresponsive'"]
+- [ ] [e.g., "Input latency is imperceptible at target 60fps framerate"]
+- [ ] [e.g., "Hit-stop reads as satisfying, not as lag or stutter"]
+
 ## UI Requirements
 
 [What information needs to be displayed to the player and when?]
 
 | Information | Display Location | Update Frequency | Condition |
 |-------------|-----------------|-----------------|-----------|
+
+## Cross-References
+
+[Declare every explicit dependency on another GDD's specific mechanic, value, or
+rule. This table is machine-checked by `/review-all-gdds` Phase 2c — it replaces
+implicit prose references with verifiable declarations. If you reference another
+system's behaviour anywhere in this document, it must appear here.]
+
+| This Document References | Target GDD | Specific Element Referenced | Nature |
+|--------------------------|-----------|----------------------------|--------|
+| [e.g., "combo multiplier feeds score"] | `design/gdd/score.md` | `combo_multiplier` output value | Data dependency |
+| [e.g., "death triggers respawn"] | `design/gdd/respawn.md` | Death state transition | State trigger |
+| [e.g., "stamina gates dodge"] | `design/gdd/stamina.md` | Stamina depletion rule | Rule dependency |
+
+> **Note on "Nature"**: use one of — `Data dependency` (we consume their output),
+> `State trigger` (their state change triggers our behaviour), `Rule dependency`
+> (our rule assumes their rule is also true), `Ownership handoff` (we hand off
+> ownership of a value to them).
 
 ## Acceptance Criteria
 

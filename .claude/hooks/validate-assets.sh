@@ -1,7 +1,10 @@
 #!/bin/bash
 # Claude Code PostToolUse hook: Validates asset files after Write/Edit
 # Checks naming conventions for files in assets/ directory
-# Exit 0 = success (non-blocking, PostToolUse cannot block)
+#
+# Exit behavior:
+#   exit 0 = success or advisory warnings only (non-blocking)
+#   exit 1 = blocking error (build-breaking issues: invalid JSON, missing required fields)
 #
 # Input schema (PostToolUse for Write/Edit):
 # { "tool_name": "Write", "tool_input": { "file_path": "assets/data/foo.json", "content": "..." } }
@@ -24,14 +27,18 @@ if ! echo "$FILE_PATH" | grep -qE '(^|/)assets/'; then
 fi
 
 FILENAME=$(basename "$FILE_PATH")
-WARNINGS=""
+WARNINGS=""   # Style/convention issues -- exit 0 with advisory message
+ERRORS=""     # Build-breaking issues -- exit 1 to block the operation
 
-# Check naming convention (lowercase with underscores only) -- uses grep -E instead of grep -P
+# ADVISORY: Check naming convention (lowercase with underscores only)
+# Naming issues are style violations -- warn but do not block
+# Uses grep -E (POSIX) not grep -P (Perl) for Windows Git Bash compatibility
 if echo "$FILENAME" | grep -qE '[A-Z[:space:]-]'; then
-    WARNINGS="$WARNINGS\nNAMING: $FILE_PATH must be lowercase with underscores (got: $FILENAME)"
+    WARNINGS="$WARNINGS\n  NAMING: $FILE_PATH must be lowercase with underscores (got: $FILENAME)"
 fi
 
-# Check JSON validity for data files
+# BLOCKING: Check JSON validity for data files
+# Invalid JSON will break runtime loading -- this is a build-breaking error
 if echo "$FILE_PATH" | grep -qE '(^|/)assets/data/.*\.json$'; then
     if [ -f "$FILE_PATH" ]; then
         # Find a working Python command
@@ -45,14 +52,21 @@ if echo "$FILE_PATH" | grep -qE '(^|/)assets/data/.*\.json$'; then
 
         if [ -n "$PYTHON_CMD" ]; then
             if ! "$PYTHON_CMD" -m json.tool "$FILE_PATH" > /dev/null 2>&1; then
-                WARNINGS="$WARNINGS\nFORMAT: $FILE_PATH is not valid JSON"
+                ERRORS="$ERRORS\n  FORMAT: $FILE_PATH is not valid JSON — fix syntax errors before continuing"
             fi
         fi
     fi
 fi
 
+# Report warnings (advisory -- non-blocking)
 if [ -n "$WARNINGS" ]; then
-    echo -e "=== Asset Validation ===$WARNINGS\n========================" >&2
+    echo -e "=== Asset Validation: Warnings ===$WARNINGS\n==================================\n(Warnings are advisory. Fix before final commit.)" >&2
+fi
+
+# Report errors and block if any build-breaking issues found
+if [ -n "$ERRORS" ]; then
+    echo -e "=== Asset Validation: ERRORS (Blocking) ===$ERRORS\n===========================================\nFix these errors before proceeding." >&2
+    exit 1
 fi
 
 exit 0

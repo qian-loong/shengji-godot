@@ -4,6 +4,8 @@ description: "Generate design or architecture documents from existing implementa
 argument-hint: "<type> <path> (e.g., 'design src/gameplay/combat' or 'architecture src/core')"
 user-invocable: true
 allowed-tools: Read, Glob, Grep, Write, Edit, Bash
+model: sonnet
+# Read-only diagnostic skill — no specialist agent delegation needed
 ---
 
 # Reverse Documentation
@@ -19,7 +21,7 @@ appropriate design or architecture documentation. Use this when:
 
 ## Workflow
 
-### 1. Parse Arguments
+## Phase 1: Parse Arguments
 
 **Format**: `/reverse-document <type> <path>`
 
@@ -40,7 +42,7 @@ appropriate design or architecture documentation. Use this when:
 /reverse-document concept prototypes/vehicle-combat
 ```
 
-### 2. Analyze Implementation
+## Phase 2: Analyze Implementation
 
 **Read and understand the code/prototype**:
 
@@ -65,17 +67,17 @@ appropriate design or architecture documentation. Use this when:
 - Find technical feasibility insights
 - Document player fantasy / feel
 
-### 3. Ask Clarifying Questions (Collaborative Protocol)
+## Phase 3: Ask Clarifying Questions
 
 **DO NOT** just describe the code. **ASK** about intent:
 
 **Design questions**:
-- "I see a stamina system that depletes during combat. Was this for:
+- "I see a [resource] system that depletes during [activity]. Was this for:
   - Pacing (prevent spam)?
   - Resource management (strategic depth)?
   - Or something else?"
-- "The stagger mechanic seems central. Is this a core pillar, or supporting feature?"
-- "Damage scales exponentially with level. Intentional power fantasy, or needs rebalancing?"
+- "The [mechanic] seems central. Is this a core pillar, or supporting feature?"
+- "[Value] scales exponentially with [factor]. Intentional design, or needs rebalancing?"
 
 **Architecture questions**:
 - "You're using a service locator pattern. Was this chosen for:
@@ -88,35 +90,34 @@ appropriate design or architecture documentation. Use this when:
 - "The prototype emphasizes stealth over combat. Is that the intended pillar?"
 - "Players seem to exploit the grappling hook for speed. Feature or bug?"
 
-### 4. Present Findings
+## Phase 4: Present Findings
 
 Before drafting, show what you discovered:
 
 ```
-I've analyzed src/gameplay/combat/. Here's what I found:
+I've analyzed [path]/. Here's what I found:
 
 MECHANICS IMPLEMENTED:
-- 3-hit combo system with timing windows
-- Guard-break mechanic (heavy attack vs blocking enemy)
-- Stamina system (depletes on attack/dodge, regens when idle)
-- Stagger system (builds up, triggers vulnerable state)
+- [mechanic-a] with [property] (e.g. timing windows, cooldowns)
+- [mechanic-b] (e.g. interaction between two states)
+- [resource] system (depletes on [action], regens on [condition])
+- [state] system (builds up, triggers [effect])
 
 FORMULAS DISCOVERED:
-- Damage = Base * (1 + StrengthScaling * Level)
-- Stagger buildup = AttackStaggerValue / (Enemy.Poise * 0.5)
-- Stamina cost = BaseStaminaCost * (1 - EfficiencyBonus)
+- [Output] = [formula using discovered variables]
+- [Secondary output] = [formula]
 
 UNCLEAR INTENT AREAS:
-1. Stamina system — pacing or resource management?
-2. Stagger — core pillar or supporting feature?
-3. Damage scaling — power fantasy or needs tuning?
+1. [Resource] system — pacing or resource management?
+2. [Mechanic] — core pillar or supporting feature?
+3. [Value] scaling — intentional design or needs tuning?
 
 Before I draft the design doc, could you clarify these points?
 ```
 
 Wait for user to clarify intent before drafting.
 
-### 5. Draft Document Using Template
+## Phase 5: Draft Document Using Template
 
 Based on type, use appropriate template:
 
@@ -132,41 +133,41 @@ Based on type, use appropriate template:
 - Identify **what's missing** (edge cases not handled, gaps in design)
 - Flag **follow-up work** (balance tuning, missing features)
 
-### 6. Show Draft and Request Approval
+## Phase 6: Show Draft and Request Approval
 
 **Collaborative protocol**:
 ```
-I've drafted the combat system design doc based on your code and clarifications.
+I've drafted the [system-name] design doc based on your code and clarifications.
 
 [Show key sections: Overview, Mechanics, Formulas, Design Intent]
 
 ADDITIONS I MADE:
-- Documented stamina as "pacing mechanic" per your clarification
-- Added edge cases not in code (what if stamina hits 0 mid-combo?)
-- Flagged balance concern: exponential damage scaling at high levels
+- Documented [mechanic] as "[intent]" per your clarification
+- Added edge cases not in code (e.g., what if [resource] hits 0 mid-[action]?)
+- Flagged balance concern: [scaling type] scaling at [boundary condition]
 
 SECTIONS MARKED AS INCOMPLETE:
-- "Enemy AI interaction with stagger" (not fully implemented yet)
-- "Weapon variety and scaling" (only sword implemented so far)
+- "[System] interaction with [other-system]" (not fully implemented yet)
+- "[Variant or feature]" (only [subset] implemented so far)
 
-May I write this to design/gdd/combat-system.md?
+May I write this to design/gdd/[system-name].md?
 ```
 
 Wait for approval. User may request changes before writing.
 
-### 7. Write Document with Metadata
+## Phase 7: Write Document with Metadata
 
 When approved, write the file with special markers:
 
 ```markdown
 ---
 status: reverse-documented
-source: src/gameplay/combat/
-date: 2026-02-13
+source: [path/]
+date: [today]
 verified-by: [User name]
 ---
 
-# Combat System Design
+# [System Name] Design
 
 > **Note**: This document was reverse-engineered from the existing implementation.
 > It captures current behavior and clarified design intent. Some sections may be
@@ -175,7 +176,7 @@ verified-by: [User name]
 [Rest of document...]
 ```
 
-### 8. Flag Follow-Up Work
+## Phase 8: Flag Follow-Up Work
 
 After writing, suggest next steps:
 
@@ -207,41 +208,41 @@ Would you like me to tackle any of these now?
 
 ---
 
-## Example Session: Reverse-Document Combat Code
+## Example Session: Reverse-Document a System
 
 ```
-User: /reverse-document design src/gameplay/combat
+User: /reverse-document design src/gameplay/[system]
 
-Agent: I'll analyze your combat implementation to create a design doc.
+Agent: I'll analyze your [system] implementation to create a design doc.
        [Reads code, discovers mechanics, formulas]
 
-Agent: I've analyzed src/gameplay/combat/. Here's what I found:
+Agent: I've analyzed src/gameplay/[system]/. Here's what I found:
        [Shows mechanics, formulas, unclear areas]
 
        Before drafting, could you clarify:
-       1. Stamina system intent?
-       2. Is stagger a core pillar?
-       3. Damage scaling — intentional or needs tuning?
+       1. [Resource] system intent?
+       2. Is [mechanic] a core pillar?
+       3. [Value] scaling — intentional or needs tuning?
 
-User: 1. Stamina is for pacing, prevent button mashing
-      2. Stagger is core — I want deliberate combat
+User: 1. [Resource] is for pacing, prevent [unwanted behavior]
+      2. [Mechanic] is core — I want [design intent]
       3. Yeah, exponential is too much, should be linear
 
 Agent: Perfect, that clarifies the vision. Let me draft the design doc.
        [Shows draft with clarified intent]
 
-       May I write this to design/gdd/combat-system.md?
+       May I write this to design/gdd/[system-name].md?
 
 User: Yes, write it.
 
-Agent: ✅ Written to design/gdd/combat-system.md
+Agent: ✅ Written to design/gdd/[system-name].md
        ✅ Marked as [REVERSE-DOCUMENTED]
-       ✅ Flagged damage scaling for rebalancing
+       ✅ Flagged [value] scaling for rebalancing
 
        Next steps:
-       - Update damage formula to linear scaling
-       - Run /balance-check to validate progression curve
-       - Document stagger as core pillar in game-pillars.md
+       - Update [formula] to [corrected scaling]
+       - Run /balance-check to validate [curve]
+       - Document [mechanic] as core pillar in game-pillars.md
 ```
 
 ---
@@ -256,7 +257,7 @@ This skill follows the collaborative design principle:
 4. **User Clarifies**: Separate intent from accidents
 5. **Draft Document**: Create doc based on reality + intent
 6. **Show Draft**: Display key sections, explain additions
-7. **Get Approval**: "May I write to [filepath]?"
+7. **Get Approval**: "May I write to [filepath]?" On approval: Verdict: **COMPLETE** — document generated. On decline: Verdict: **BLOCKED** — user declined write.
 8. **Flag Follow-Up**: Suggest related work, don't auto-execute
 
 **Never assume intent. Always ask before documenting "why".**

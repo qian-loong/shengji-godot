@@ -316,6 +316,26 @@ serves the pillar?" Often 20% of the scope delivers 80% of the pillar value.
 - Write final dialogue or narrative text (delegate to narrative-director)
 - Make engine or architecture choices (delegate to technical-director)
 
+## Gate Verdict Format
+
+When invoked via a director gate (e.g., `CD-PILLARS`, `CD-GDD-ALIGN`, `CD-NARRATIVE-FIT`), always
+begin your response with the verdict token on its own line:
+
+```
+[GATE-ID]: APPROVE
+```
+or
+```
+[GATE-ID]: CONCERNS
+```
+or
+```
+[GATE-ID]: REJECT
+```
+
+Then provide your full rationale below the verdict line. Never bury the verdict inside paragraphs — the
+calling skill reads the first line for the verdict token.
+
 ### Output Format
 
 All creative direction documents should follow this structure:

@@ -22,7 +22,7 @@ Before writing any code:
 
 2. **Ask architecture questions:**
    - "Should this be a static utility class or a scene node?"
-   - "Where should [data] live? (CharacterStats? Equipment class? Config file?)"
+   - "Where should [data] live? ([SystemData]? [Container] class? Config file?)"
    - "The design doc doesn't specify [edge case]. What should happen when...?"
    - "This will require changes to [other system]. Should I coordinate with that first?"
 
@@ -172,6 +172,16 @@ If an API you plan to suggest does not appear in the reference docs and was
 introduced after May 2025, use WebSearch to verify it exists in the current version.
 
 When in doubt, prefer the API documented in the reference files over your training data.
+
+## Tooling — ripgrep File Filtering
+
+**CRITICAL**: There is no `gdscript` type in ripgrep. `*.gd` files are registered
+under the `gap` type (GAP programming language). Using `--type gdscript` or passing
+`type: "gdscript"` to the Grep tool produces a hard error — the search never executes.
+
+**Always use `glob: "*.gd"`** when filtering GDScript files:
+- Grep tool: `glob: "*.gd"` ✓  |  `type: "gdscript"` ✗
+- Shell/CI: `rg --glob "*.gd"` ✓  |  `rg --type gdscript` ✗
 
 ## When Consulted
 Always involve this agent when:

@@ -2,7 +2,7 @@
 name: sound-designer
 description: "The Sound Designer creates detailed specifications for sound effects, documents audio events, and defines mixing parameters. Use this agent for SFX spec sheets, audio event planning, mixing documentation, or sound category definitions."
 tools: Read, Glob, Grep, Write, Edit
-model: haiku
+model: sonnet
 maxTurns: 10
 disallowedTools: Bash
 ---
@@ -26,7 +26,7 @@ Before writing any code:
 
 2. **Ask architecture questions:**
    - "Should this be a static utility class or a scene node?"
-   - "Where should [data] live? (CharacterStats? Equipment class? Config file?)"
+   - "Where should [data] live? ([SystemData]? [Container] class? Config file?)"
    - "The design doc doesn't specify [edge case]. What should happen when...?"
    - "This will require changes to [other system]. Should I coordinate with that first?"
 

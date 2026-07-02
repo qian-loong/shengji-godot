@@ -1,49 +1,75 @@
 ---
 name: balance-check
-description: "Analyzes game balance data files, formulas, and configuration to identify outliers, broken progressions, degenerate strategies, and economy imbalances. Use after modifying any balance-related data or design."
+description: "Analyzes game balance data files, formulas, and configuration to identify outliers, broken progressions, degenerate strategies, and economy imbalances. Use after modifying any balance-related data or design. Use when user says 'balance report', 'check game balance', 'run a balance check'."
 argument-hint: "[system-name|path-to-data-file]"
 user-invocable: true
-allowed-tools: Read, Glob, Grep
+allowed-tools: Read, Glob, Grep, Write, AskUserQuestion
+model: sonnet
+agent: economy-designer
 ---
 
-When this skill is invoked:
+## Phase 1: Identify Balance Domain
 
-1. **Identify the balance domain** from the argument.
+Determine the balance domain from `$ARGUMENTS[0]`:
 
-2. **Read relevant data files** from `assets/data/` and `design/balance/`.
+- **Combat** → weapon/ability DPS, time-to-kill, damage type interactions
+- **Economy** → resource faucets/sinks, acquisition rates, item pricing
+- **Progression** → XP/power curves, dead zones, power spikes
+- **Loot** → rarity distribution, pity timers, inventory pressure
+- **File path given** → load that file directly and infer domain from content
 
-3. **Read the design document** for the system being checked from `design/gdd/`.
+If no argument, ask the user which system to check.
 
-4. **Perform analysis**:
+---
 
-   For **combat balance**:
-   - Calculate DPS for all weapons/abilities at each power tier
-   - Check time-to-kill at each tier
-   - Identify any options that dominate all others (strictly better)
-   - Check if defensive options can create unkillable states
-   - Verify damage type/resistance interactions are balanced
+## Phase 2: Read Data Files
 
-   For **economy balance**:
-   - Map all resource faucets and sinks with flow rates
-   - Project resource accumulation over time
-   - Check for infinite resource loops
-   - Verify gold sinks scale with gold generation
-   - Check if any items are never worth purchasing
+Read relevant files from `assets/data/` and `design/balance/` for the identified domain.
+Note every file read — they will appear in the Data Sources section of the report.
 
-   For **progression balance**:
-   - Plot the XP curve and power curve
-   - Check for dead zones (no meaningful progression for too long)
-   - Check for power spikes (sudden jumps in capability)
-   - Verify content gates align with expected player power
-   - Check if skip/grind strategies break intended pacing
+---
 
-   For **loot balance**:
-   - Calculate expected time to acquire each rarity tier
-   - Check pity timer math
-   - Verify no loot is strictly useless at any stage
-   - Check inventory pressure vs acquisition rate
+## Phase 3: Read Design Document
 
-5. **Output the analysis**:
+Read the GDD for the system from `design/gdd/` to understand intended design targets,
+tuning knobs, and expected value ranges. This is the baseline for "correct" behaviour.
+
+---
+
+## Phase 4: Perform Analysis
+
+Run domain-specific checks:
+
+**Combat balance:**
+- Calculate DPS for all weapons/abilities at each power tier
+- Check time-to-kill at each tier
+- Identify any options that dominate all others (strictly better)
+- Check if defensive options can create unkillable states
+- Verify damage type/resistance interactions are balanced
+
+**Economy balance:**
+- Map all resource faucets and sinks with flow rates
+- Project resource accumulation over time
+- Check for infinite resource loops
+- Verify gold sinks scale with gold generation
+- Check if any items are never worth purchasing
+
+**Progression balance:**
+- Plot the XP curve and power curve
+- Check for dead zones (no meaningful progression for too long)
+- Check for power spikes (sudden jumps in capability)
+- Verify content gates align with expected player power
+- Check if skip/grind strategies break intended pacing
+
+**Loot balance:**
+- Calculate expected time to acquire each rarity tier
+- Check pity timer math
+- Verify no loot is strictly useless at any stage
+- Check inventory pressure vs acquisition rate
+
+---
+
+## Phase 5: Output the Analysis
 
 ```
 ## Balance Check: [System Name]
@@ -70,3 +96,28 @@ When this skill is invoked:
 ### Values That Need Attention
 [Specific values with suggested adjustments and rationale]
 ```
+
+---
+
+## Phase 6: Fix & Verify Cycle
+
+After presenting the report, use `AskUserQuestion`:
+- Prompt: "Balance check complete. What would you like to do next?"
+- Options:
+  - `[A] Fix highest-priority issue now — walk me through it`
+  - `[B] Save report to design/balance/balance-check-[system]-[date].md`
+  - `[C] Stop here — I'll review the findings manually`
+
+If [A]:
+- Ask which issue to address first (refer to the Recommendations table by priority row)
+- Guide the user to update the relevant data file in `assets/data/` or formula in `design/balance/`
+- After each fix, offer to re-run the relevant balance checks to verify no new outliers were introduced
+- If the fix changes a tuning knob defined in a GDD or referenced by an ADR, remind the user:
+  > "This value is defined in a design document. Run `/propagate-design-change [path]` on the affected GDD to find downstream impacts before committing."
+
+If [B]:
+- Write the report to `design/balance/balance-check-[system]-[date].md` (create the directory if needed). Use the current date for [date] in YYYY-MM-DD format.
+- Confirm the file was written, then end with: "Re-run `/balance-check` after fixes to verify."
+
+If [C]:
+- Summarize open issues and end with: "Re-run `/balance-check` after fixes to verify."
