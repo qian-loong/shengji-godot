@@ -23,6 +23,10 @@ var seat_count_labels: Dictionary = {}  # seat -> Label
 var hand_display = null
 var action_bar: HBoxContainer
 var bid_panel: PanelContainer
+var previous_trick_btn: Button
+var bottom_btn: Button
+var preview_panel: PanelContainer
+var preview_content: VBoxContainer
 var message_label: Label
 var log_panel: RichTextLabel
 
@@ -41,10 +45,18 @@ var current_rank: int = Card.Rank.TWO
 var is_first_game: bool = true
 var round_num: int = 0
 var base_seed: int = -1
+var debug_ui_enabled: bool = false
 
 var current_phase: String = "idle"
 var waiting_for_input: bool = false
 var _bid_seat_index: int = 0
+var first_game_dealing: bool = false
+var deal_round_index: int = 0
+var deal_seat_index: int = 0
+var visible_deal_hands: Array = [[], [], [], []]
+var pending_first_bid: TrumpBidding.BidDeclaration = null
+var visible_first_bid_choices: Array = []
+const DEAL_STEP_SECONDS: float = 0.08
 
 # Trick state
 var trick_play_cards: Array = []
@@ -53,6 +65,10 @@ var trick_seat_order: Array[int] = []
 var trick_lead_info: Dictionary = {}
 var trick_num: int = 0
 var table_cards: Dictionary = {}
+var last_trick_plays_snapshot: Dictionary = {}
+var human_bottom_received_snapshot: Array = []
+var human_buried_bottom_snapshot: Array = []
+var preview_token: int = 0
 
 const UI_LOG_MAX_LINES: int = 200
 var ui_log_lines: Array[String] = []
@@ -70,6 +86,10 @@ func _parse_cli_args() -> void:
 	for arg: String in OS.get_cmdline_args():
 		if arg.begins_with("--seed="):
 			base_seed = arg.split("=")[1].to_int()
+		elif arg == "--debug-ui" or arg == "--dev-ui":
+			debug_ui_enabled = true
+		elif arg == "--hide-debug-ui":
+			debug_ui_enabled = false
 
 
 # ============================================================
@@ -168,7 +188,8 @@ func _build_ui() -> void:
 	log_panel = RichTextLabel.new()
 	log_panel.bbcode_enabled = true
 	log_panel.scroll_following = true
-	log_panel.custom_minimum_size = Vector2(0, 80)
+	log_panel.visible = debug_ui_enabled
+	log_panel.custom_minimum_size = Vector2(0, 80) if debug_ui_enabled else Vector2.ZERO
 	log_panel.add_theme_font_size_override("normal_font_size", 12)
 	log_panel.add_theme_color_override("default_color", Color(0.7, 0.7, 0.7))
 	root.add_child(log_panel)
@@ -194,6 +215,16 @@ func _build_info_bar() -> HBoxContainer:
 		lbl.add_theme_color_override("font_color", Color(0.95, 0.90, 0.75))
 		bar.add_child(lbl)
 		info_labels[key] = lbl
+
+	previous_trick_btn = _make_styled_button("上一轮", Color(0.25, 0.45, 0.65))
+	previous_trick_btn.disabled = true
+	previous_trick_btn.pressed.connect(_show_previous_trick_preview)
+	bar.add_child(previous_trick_btn)
+
+	bottom_btn = _make_styled_button("底牌", Color(0.55, 0.40, 0.20))
+	bottom_btn.visible = false
+	bottom_btn.pressed.connect(_show_bottom_preview)
+	bar.add_child(bottom_btn)
 
 	return bar
 
@@ -257,6 +288,9 @@ func _build_table_center() -> Control:
 		center.add_child(slot)
 		center_card_slots[seat] = slot
 
+	preview_panel = _build_preview_panel()
+	center.add_child(preview_panel)
+
 	center.resized.connect(_position_center_slots)
 	return center
 
@@ -277,6 +311,39 @@ func _position_center_slots() -> void:
 	center_card_slots[1].position = Vector2(cx + hoff - slot_w * 0.5, cy - slot_h * 0.5)
 	# West (seat 3) — left
 	center_card_slots[3].position = Vector2(cx - hoff - slot_w * 0.5, cy - slot_h * 0.5)
+	if preview_panel:
+		preview_panel.position = Vector2(cx - 310.0, cy - 150.0)
+
+
+func _build_preview_panel() -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.visible = false
+	panel.mouse_filter = MOUSE_FILTER_IGNORE
+	panel.custom_minimum_size = Vector2(620, 240)
+	panel.size = panel.custom_minimum_size
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.04, 0.08, 0.06, 0.88)
+	style.border_color = Color(0.95, 0.82, 0.45, 0.6)
+	style.border_width_top = 2
+	style.border_width_bottom = 2
+	style.border_width_left = 2
+	style.border_width_right = 2
+	style.corner_radius_top_left = 10
+	style.corner_radius_top_right = 10
+	style.corner_radius_bottom_left = 10
+	style.corner_radius_bottom_right = 10
+	style.content_margin_left = 14
+	style.content_margin_right = 14
+	style.content_margin_top = 10
+	style.content_margin_bottom = 10
+	panel.add_theme_stylebox_override("panel", style)
+
+	preview_content = VBoxContainer.new()
+	preview_content.mouse_filter = MOUSE_FILTER_IGNORE
+	preview_content.add_theme_constant_override("separation", 8)
+	panel.add_child(preview_content)
+	return panel
 
 
 func _build_bid_panel() -> PanelContainer:
@@ -350,7 +417,18 @@ func _start_new_game() -> void:
 	current_dealer = 0
 	round_num = 0
 	is_first_game = true
+	last_trick_plays_snapshot = {}
+	human_bottom_received_snapshot = []
+	human_buried_bottom_snapshot = []
+	first_game_dealing = false
+	deal_round_index = 0
+	deal_seat_index = 0
+	visible_deal_hands = [[], [], [], []]
+	pending_first_bid = null
+	visible_first_bid_choices = []
+	_hide_preview_panel()
 	_sync_controller_from_host_state()
+	_update_aux_buttons()
 
 	_log("[color=gold]═══ 双升对局 — 图形版 ═══[/color]")
 	_start_round()
@@ -366,6 +444,10 @@ func _start_round() -> void:
 	_sync_controller_from_host_state()
 	session_controller.start_round(round_seed)
 	_sync_host_from_controller()
+	last_trick_plays_snapshot = {}
+	human_bottom_received_snapshot = []
+	human_buried_bottom_snapshot = []
+	_hide_preview_panel()
 
 	hand_display.set_trump_context(game_round.trump_suit, current_rank, rule_config.joker_always_trump)
 	hand_display.set_sort_callback(_sort_hand_callback)
@@ -377,13 +459,226 @@ func _start_round() -> void:
 
 	_update_info()
 	_update_seat_counts()
+	_update_aux_buttons()
 	_clear_table_cards()
-	_start_bidding()
+	if is_first_game:
+		_start_first_game_deal()
+	else:
+		_start_bidding()
 
 
 # ============================================================
 # Bidding
 # ============================================================
+
+func _start_first_game_deal() -> void:
+	first_game_dealing = true
+	deal_round_index = 0
+	deal_seat_index = 0
+	visible_deal_hands = [[], [], [], []]
+	pending_first_bid = null
+	visible_first_bid_choices = []
+	current_phase = "dealing"
+	session_controller.current_phase = "bidding"
+	_clear_actions()
+	_hide_bid_panel()
+	_refresh_first_deal_bid_bar()
+	_update_visible_deal_counts()
+	hand_display.show_hand([], false)
+	_set_message("首局发牌中，可抢主")
+	_log("[color=green]— 首局发牌中抢主 —[/color]")
+	_deal_next_visible_card()
+
+
+func _deal_next_visible_card() -> void:
+	if not first_game_dealing:
+		return
+	if deal_round_index >= rule_config.hand_size:
+		_finish_first_game_deal()
+		return
+
+	var seat := deal_seat_index
+	var card: Card = game_round.hands[seat][deal_round_index]
+	(visible_deal_hands[seat] as Array).append(card)
+	deal_seat_index += 1
+	if deal_seat_index >= 4:
+		deal_seat_index = 0
+		deal_round_index += 1
+
+	_update_visible_deal_counts()
+	if seat == human_seat:
+		hand_display.show_hand(visible_deal_hands[human_seat], false)
+		_refresh_first_deal_bid_bar()
+	if pending_first_bid == null:
+		if seat == human_seat:
+			pass
+		else:
+			var decl := AIPlayer.decide_bid(seat, visible_deal_hands[seat], current_rank, rule_config)
+			if decl != null:
+				pending_first_bid = decl
+				_clear_actions()
+				_log("%s 抢主: %s" % [SEAT_NAMES[seat], TrumpBidding.bid_label(decl)])
+				_set_message("%s 已抢主: %s" % [SEAT_NAMES[seat], TrumpBidding.bid_label(decl)])
+
+	get_tree().create_timer(DEAL_STEP_SECONDS).timeout.connect(_deal_next_visible_card)
+
+
+func _finish_first_game_deal() -> void:
+	first_game_dealing = false
+	current_phase = "bidding"
+	waiting_for_input = false
+	visible_first_bid_choices = []
+	_clear_actions()
+	hand_display.show_hand(game_round.get_hand(human_seat), false)
+	_update_seat_counts()
+
+	if pending_first_bid != null:
+		var result := session_controller.submit_bid_or_pass(pending_first_bid.seat_id, pending_first_bid)
+		if result.get("ok", false):
+			_log("抢主完成: %s | 庄家: %s" % [
+				TrumpBidding.bid_label(pending_first_bid),
+				SEAT_NAMES[pending_first_bid.seat_id],
+			])
+	else:
+		session_controller.resolve_no_bid_default()
+		_log("无人抢主，默认 %s 为庄家，公主局" % SEAT_NAMES[current_dealer])
+
+	_finish_bidding()
+
+
+func _update_visible_deal_counts() -> void:
+	for seat: int in [1, 2, 3]:
+		if seat_count_labels.has(seat):
+			var count := (visible_deal_hands[seat] as Array).size()
+			seat_count_labels[seat].text = "%d 张" % count
+
+
+func _refresh_first_deal_bid_bar() -> void:
+	if not first_game_dealing or pending_first_bid != null:
+		return
+
+	var bids := _strongest_bids_by_trump_choice(TrumpBidding.get_available_bids(
+		human_seat,
+		visible_deal_hands[human_seat],
+		current_rank,
+		rule_config
+	))
+	if _first_deal_choices_match(bids):
+		return
+
+	waiting_for_input = true
+	visible_first_bid_choices = bids.duplicate()
+	_clear_actions()
+
+	var title := Label.new()
+	title.text = "抢主"
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_color_override("font_color", Color(1, 0.95, 0.7))
+	action_bar.add_child(title)
+
+	for suit: int in [Card.Suit.SPADE, Card.Suit.HEART, Card.Suit.CLUB, Card.Suit.DIAMOND]:
+		_add_first_deal_bid_button(_bid_for_suit(bids, suit), Card.suit_symbol(suit), _base_suit_button_color(suit))
+	_add_first_deal_bid_button(_bid_for_suit(bids, -1), "NT", Color(0.6, 0.4, 0.1))
+
+
+func _add_first_deal_bid_button(bid: TrumpBidding.BidDeclaration, fallback_label: String, color: Color) -> void:
+	var btn := _make_styled_button(fallback_label if bid == null else _first_deal_bid_button_label(bid), color)
+	btn.custom_minimum_size = Vector2(78, 40)
+	if bid == null:
+		btn.disabled = true
+	else:
+		var chosen := bid
+		btn.pressed.connect(func() -> void:
+			_on_first_deal_bid_chosen(chosen)
+		)
+	action_bar.add_child(btn)
+
+
+func _on_first_deal_bid_chosen(decl: TrumpBidding.BidDeclaration) -> void:
+	if not first_game_dealing or pending_first_bid != null or decl == null:
+		return
+	waiting_for_input = false
+	visible_first_bid_choices = []
+	pending_first_bid = decl
+	_clear_actions()
+	_log("你抢主: %s" % TrumpBidding.bid_label(decl))
+	_set_message("你已抢主: %s" % TrumpBidding.bid_label(decl))
+
+
+func _bid_choice_key(bid: TrumpBidding.BidDeclaration) -> String:
+	return "%d:%d:%d" % [bid.bid_type, bid.suit, bid.rank]
+
+
+func _strongest_bids_by_trump_choice(bids: Array) -> Array:
+	var by_choice: Dictionary = {}
+	for bid: TrumpBidding.BidDeclaration in bids:
+		var key := str(bid.suit)
+		if not by_choice.has(key):
+			by_choice[key] = bid
+			continue
+		var existing: TrumpBidding.BidDeclaration = by_choice[key]
+		if bid.bid_type > existing.bid_type:
+			by_choice[key] = bid
+
+	var result: Array = []
+	for suit: int in [Card.Suit.SPADE, Card.Suit.HEART, Card.Suit.CLUB, Card.Suit.DIAMOND]:
+		var key := str(suit)
+		if by_choice.has(key):
+			result.append(by_choice[key])
+	if by_choice.has("-1"):
+		result.append(by_choice["-1"])
+	return result
+
+
+func _bid_for_suit(bids: Array, suit: int) -> TrumpBidding.BidDeclaration:
+	for bid: TrumpBidding.BidDeclaration in bids:
+		if bid.suit == suit:
+			return bid
+	return null
+
+
+func _first_deal_bid_button_label(bid: TrumpBidding.BidDeclaration) -> String:
+	if bid.bid_type == TrumpBidding.BidType.PAIR_JOKER or bid.suit < 0:
+		return "NT 公主"
+	return "%s %s" % [Card.suit_symbol(bid.suit), _bid_type_short_label(bid.bid_type)]
+
+
+func _bid_type_short_label(bid_type: int) -> String:
+	match bid_type:
+		TrumpBidding.BidType.SINGLE_RANK:
+			return "单"
+		TrumpBidding.BidType.PAIR_RANK:
+			return "对"
+		TrumpBidding.BidType.JOKER_SINGLE_RANK:
+			return "王+单"
+		TrumpBidding.BidType.JOKER_PAIR_RANK:
+			return "王+对"
+		_:
+			return ""
+
+
+func _base_suit_button_color(suit: int) -> Color:
+	match suit:
+		Card.Suit.HEART, Card.Suit.DIAMOND:
+			return Color(0.8, 0.2, 0.2)
+		Card.Suit.SPADE, Card.Suit.CLUB:
+			return Color(0.25, 0.35, 0.55)
+		_:
+			return Color(0.6, 0.4, 0.1)
+
+
+func _first_deal_choices_match(bids: Array) -> bool:
+	if not waiting_for_input or bids.size() != visible_first_bid_choices.size():
+		return false
+	var current_keys := {}
+	for bid: TrumpBidding.BidDeclaration in visible_first_bid_choices:
+		current_keys[_bid_choice_key(bid)] = true
+	for bid: TrumpBidding.BidDeclaration in bids:
+		if not current_keys.has(_bid_choice_key(bid)):
+			return false
+	return true
+
 
 func _start_bidding() -> void:
 	current_phase = "bidding"
@@ -486,7 +781,10 @@ func _finish_bidding() -> void:
 
 func _show_bid_options(bids: Array) -> void:
 	waiting_for_input = true
-	_refresh_hand_display(false)
+	if first_game_dealing:
+		hand_display.show_hand(visible_deal_hands[human_seat], false)
+	else:
+		_refresh_hand_display(false)
 
 	var content := bid_panel.get_node("BidContent")
 	for child: Node in content.get_children():
@@ -523,13 +821,18 @@ func _on_bid_selected(bids: Array, index: int) -> void:
 		return
 	waiting_for_input = false
 	var decl: TrumpBidding.BidDeclaration = bids[index]
-	session_controller.submit_bid_or_pass(human_seat, decl)
-	_sync_host_from_controller()
 	_log("你亮主: %s" % TrumpBidding.bid_label(decl))
 	_hide_bid_panel()
-	if is_first_game:
+	if first_game_dealing:
+		pending_first_bid = decl
+		_set_message("你已抢主: %s" % TrumpBidding.bid_label(decl))
+	elif is_first_game:
+		session_controller.submit_bid_or_pass(human_seat, decl)
+		_sync_host_from_controller()
 		_finish_bidding_round()
 	else:
+		session_controller.submit_bid_or_pass(human_seat, decl)
+		_sync_host_from_controller()
 		_finish_bidding()
 
 
@@ -538,11 +841,14 @@ func _on_bid_skip() -> void:
 		return
 	waiting_for_input = false
 	_log("你选择不亮")
-	session_controller.submit_bid_or_pass(human_seat, null, "player_choice")
 	_hide_bid_panel()
-	if is_first_game:
+	if first_game_dealing:
+		_set_message("继续发牌")
+	elif is_first_game:
+		session_controller.submit_bid_or_pass(human_seat, null, "player_choice")
 		_finish_bidding_round()
 	else:
+		session_controller.submit_bid_or_pass(human_seat, null, "player_choice")
 		_bid_seat_index += 1
 		_process_next_bidder()
 
@@ -574,6 +880,9 @@ func _start_bury() -> void:
 		_after_bury_done()
 	else:
 		var merged: Array = context["merged_hand"]
+		human_bottom_received_snapshot = _last_cards(merged, rule_config.bottom_size)
+		human_buried_bottom_snapshot = []
+		_update_aux_buttons()
 		_set_message("配底阶段（%s）— 选 %d 张扣底" % [label, rule_config.bottom_size])
 		hand_display.show_hand(merged, true)
 		_show_bury_actions()
@@ -614,6 +923,8 @@ func _on_bury_confirm() -> void:
 
 	var result := session_controller.submit_bury(actual_indices)
 	if result["ok"]:
+		human_buried_bottom_snapshot = (result.get("buried", []) as Array).duplicate()
+		_update_aux_buttons()
 		_log("配底完成")
 		_auto_save_log()
 		_after_bury_done()
@@ -772,6 +1083,7 @@ func _start_play_phase() -> void:
 
 
 func _start_next_trick() -> void:
+	_hide_preview_panel()
 	if game_round.get_hand_size(0) <= 0:
 		_finish_round()
 		return
@@ -870,6 +1182,7 @@ func _on_play_confirm() -> void:
 	waiting_for_input = false
 	_sync_trick_host_from_controller()
 	_show_played_cards(human_seat, cards)
+	_preview_human_hand_after_play(cards)
 	_update_seat_counts()
 	_log("  你出: %s" % _cards_str(cards))
 
@@ -882,12 +1195,14 @@ func _on_play_confirm() -> void:
 
 func _resolve_trick() -> void:
 	var result := session_controller.last_trick_result
+	_capture_last_trick_plays(result)
 	var winner_name := SEAT_NAMES[result["winner"]]
 	var side := "攻方" if game_round.is_attack(result["winner"]) else "庄家方"
 	_log("  → %s 赢墩 (%s) | 本墩: %d 分 | 攻方总分: %d" % [
 		winner_name, side, result["score"], result["attack_score"]])
 
 	_update_info()
+	_update_aux_buttons()
 
 	if result["is_last"]:
 		get_tree().create_timer(1.0).timeout.connect(_finish_round)
@@ -971,8 +1286,38 @@ func _refresh_hand_display(interactive: bool) -> void:
 	hand_display.show_hand(hand, interactive)
 
 
+func _preview_human_hand_after_play(played_cards: Array) -> void:
+	var hand := game_round.get_hand(human_seat)
+	hand_display.show_hand(_cards_without(hand, played_cards), false)
+
+
+func _cards_without(source_cards: Array, removed_cards: Array) -> Array:
+	var result := source_cards.duplicate()
+	for removed: Card in removed_cards:
+		for i: int in range(result.size()):
+			var card: Card = result[i]
+			if card.equals(removed):
+				result.remove_at(i)
+				break
+	return result
+
+
 func _show_played_cards(seat: int, cards: Array) -> void:
 	table_cards[seat] = cards
+	_render_cards_in_slot(seat, cards)
+
+
+func _render_table_cards(cards_by_seat: Dictionary) -> void:
+	for seat: int in center_card_slots:
+		_render_cards_in_slot(seat, cards_by_seat.get(seat, []))
+
+
+func _restore_current_table_cards() -> void:
+	_render_table_cards(table_cards)
+	_update_info()
+
+
+func _render_cards_in_slot(seat: int, cards: Array) -> void:
 	var slot: Control = center_card_slots[seat]
 	# Clear old
 	for child: Node in slot.get_children():
@@ -1013,6 +1358,7 @@ func _update_info() -> void:
 		info_labels["score"].text = "攻方: %d 分" % score
 	if info_labels.has("round"):
 		info_labels["round"].text = "第 %d 局" % round_num
+	_update_aux_buttons()
 
 
 func _update_seat_counts() -> void:
@@ -1036,6 +1382,207 @@ func _update_seat_counts() -> void:
 
 func _set_message(msg: String) -> void:
 	message_label.text = msg
+
+
+func _update_aux_buttons() -> void:
+	var can_preview := _can_show_preview_overlay()
+	var has_human_bottom := not human_bottom_received_snapshot.is_empty() \
+		or not human_buried_bottom_snapshot.is_empty()
+	if previous_trick_btn:
+		previous_trick_btn.disabled = last_trick_plays_snapshot.is_empty() or not can_preview
+	if bottom_btn:
+		bottom_btn.visible = can_preview and has_human_bottom
+
+
+func _can_show_preview_overlay() -> bool:
+	if session_controller == null:
+		return false
+	return session_controller.current_phase in ["playing", "round_end", "game_over"]
+
+
+func _capture_last_trick_plays(result: Dictionary) -> void:
+	last_trick_plays_snapshot = {}
+	for play: Dictionary in result.get("plays", []):
+		var seat: int = play.get("seat", -1)
+		if seat >= 0:
+			last_trick_plays_snapshot[seat] = (play.get("cards", []) as Array).duplicate()
+
+
+func _show_previous_trick_preview() -> void:
+	if last_trick_plays_snapshot.is_empty() or not _can_show_preview_overlay():
+		return
+	_show_previous_trick_overlay()
+
+
+func _show_bottom_preview() -> void:
+	if not _can_show_preview_overlay():
+		return
+	if human_bottom_received_snapshot.is_empty() and human_buried_bottom_snapshot.is_empty():
+		return
+	var rows: Array[Dictionary] = []
+	if not human_bottom_received_snapshot.is_empty():
+		rows.append({
+			"label": "拿到底牌",
+			"cards": human_bottom_received_snapshot,
+		})
+	if not human_buried_bottom_snapshot.is_empty():
+		rows.append({
+			"label": "已扣底",
+			"cards": human_buried_bottom_snapshot,
+		})
+	_show_preview_overlay("底牌", rows)
+
+
+func _show_preview_overlay(title: String, rows: Array[Dictionary]) -> void:
+	if preview_panel == null or preview_content == null:
+		return
+	preview_token += 1
+	var token := preview_token
+	_clear_preview_content()
+
+	var title_label := Label.new()
+	title_label.text = title
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_label.add_theme_font_size_override("font_size", 17)
+	title_label.add_theme_color_override("font_color", Color(1.0, 0.93, 0.65))
+	preview_content.add_child(title_label)
+
+	for row: Dictionary in rows:
+		var cards: Array = row.get("cards", []) as Array
+		_add_preview_row(str(row.get("label", "")), cards)
+
+	preview_panel.visible = true
+	get_tree().create_timer(3.0).timeout.connect(func() -> void:
+		if token == preview_token:
+			_hide_preview_panel()
+	)
+
+
+func _show_previous_trick_overlay() -> void:
+	if preview_panel == null or preview_content == null:
+		return
+	preview_token += 1
+	var token := preview_token
+	_clear_preview_content()
+
+	var title_label := Label.new()
+	title_label.text = "上一轮出牌"
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_label.add_theme_font_size_override("font_size", 17)
+	title_label.add_theme_color_override("font_color", Color(1.0, 0.93, 0.65))
+	preview_content.add_child(title_label)
+
+	var north := HBoxContainer.new()
+	north.alignment = BoxContainer.ALIGNMENT_CENTER
+	north.mouse_filter = MOUSE_FILTER_IGNORE
+	preview_content.add_child(north)
+	_add_preview_hand(north, "上", last_trick_plays_snapshot.get(2, []) as Array)
+
+	var middle := HBoxContainer.new()
+	middle.alignment = BoxContainer.ALIGNMENT_CENTER
+	middle.mouse_filter = MOUSE_FILTER_IGNORE
+	middle.add_theme_constant_override("separation", 48)
+	preview_content.add_child(middle)
+	_add_preview_hand(middle, "左", last_trick_plays_snapshot.get(3, []) as Array)
+	_add_preview_hand(middle, "右", last_trick_plays_snapshot.get(1, []) as Array)
+
+	var south := HBoxContainer.new()
+	south.alignment = BoxContainer.ALIGNMENT_CENTER
+	south.mouse_filter = MOUSE_FILTER_IGNORE
+	preview_content.add_child(south)
+	_add_preview_hand(south, "下", last_trick_plays_snapshot.get(0, []) as Array)
+
+	preview_panel.visible = true
+	get_tree().create_timer(3.0).timeout.connect(func() -> void:
+		if token == preview_token:
+			_hide_preview_panel()
+	)
+
+
+func _add_preview_row(label_text: String, cards: Array) -> void:
+	var row := HBoxContainer.new()
+	row.mouse_filter = MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 6)
+	preview_content.add_child(row)
+
+	var label := Label.new()
+	label.text = "%s:" % label_text
+	label.custom_minimum_size = Vector2(76, 0)
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 14)
+	label.add_theme_color_override("font_color", Color(0.90, 0.90, 0.82))
+	row.add_child(label)
+
+	if cards.is_empty():
+		var empty := Label.new()
+		empty.text = "无"
+		empty.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		empty.add_theme_color_override("font_color", Color(0.75, 0.75, 0.75))
+		row.add_child(empty)
+		return
+
+	for card: Card in cards:
+		var cv = _CardViewClass.new()
+		cv.setup(card, true, _is_trump(card))
+		cv.disabled = true
+		cv.mouse_filter = MOUSE_FILTER_IGNORE
+		cv.custom_minimum_size = Vector2(42, 60)
+		cv.size = Vector2(42, 60)
+		row.add_child(cv)
+
+
+func _add_preview_hand(parent: Control, label_text: String, cards: Array) -> void:
+	var hand := HBoxContainer.new()
+	hand.mouse_filter = MOUSE_FILTER_IGNORE
+	hand.add_theme_constant_override("separation", 4)
+	parent.add_child(hand)
+
+	var label := Label.new()
+	label.text = "%s:" % label_text
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 14)
+	label.add_theme_color_override("font_color", Color(0.90, 0.90, 0.82))
+	hand.add_child(label)
+
+	if cards.is_empty():
+		var empty := Label.new()
+		empty.text = "无"
+		empty.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		empty.add_theme_color_override("font_color", Color(0.75, 0.75, 0.75))
+		hand.add_child(empty)
+		return
+
+	for card: Card in cards:
+		var cv = _CardViewClass.new()
+		cv.setup(card, true, _is_trump(card))
+		cv.disabled = true
+		cv.mouse_filter = MOUSE_FILTER_IGNORE
+		cv.custom_minimum_size = Vector2(36, 52)
+		cv.size = Vector2(36, 52)
+		hand.add_child(cv)
+
+
+func _hide_preview_panel() -> void:
+	preview_token += 1
+	if preview_panel:
+		preview_panel.visible = false
+	_clear_preview_content()
+
+
+func _clear_preview_content() -> void:
+	if preview_content == null:
+		return
+	for child: Node in preview_content.get_children():
+		preview_content.remove_child(child)
+		child.queue_free()
+
+
+func _last_cards(cards: Array, count: int) -> Array:
+	var result: Array = []
+	var start: int = max(0, cards.size() - count)
+	for i: int in range(start, cards.size()):
+		result.append(cards[i])
+	return result
 
 
 # ============================================================
@@ -1081,7 +1628,7 @@ func _log(msg: String) -> void:
 	ui_log_lines.append(msg)
 	while ui_log_lines.size() > UI_LOG_MAX_LINES:
 		ui_log_lines.remove_at(0)
-	if log_panel:
+	if log_panel and debug_ui_enabled:
 		log_panel.clear()
 		log_panel.append_text("\n".join(ui_log_lines) + "\n")
 
