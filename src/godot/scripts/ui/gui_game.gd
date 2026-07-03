@@ -56,10 +56,18 @@ var first_deal_bid_buttons: HBoxContainer
 var bid_panel: PanelContainer
 var previous_trick_btn: Button
 var bottom_btn: Button
-var preview_panel: PanelContainer
-var preview_content: VBoxContainer
+var preview_panel: Control
+var preview_content: Control
 var settlement_panel: PanelContainer
 var settlement_content: VBoxContainer
+# Overlay layer for modal panels (settlement, bid). Kept on its own CanvasLayer
+# so main layout stretching / fullscreen mode cannot hide or clip them.
+var overlay_layer: CanvasLayer
+# Full-viewport backdrop that lives on overlay_layer, below the modals. When a
+# modal panel is visible the backdrop is also visible and absorbs all clicks
+# outside the panel — otherwise the top-right aux buttons (上一轮/底牌) remain
+# interactive under the panel.
+var modal_backdrop: ColorRect
 var hand_area_panel: PanelContainer
 var message_label: RichTextLabel
 var log_panel: RichTextLabel
@@ -184,7 +192,13 @@ func _handle_back_request() -> void:
 			_hide_bid_panel()
 		return
 	if first_deal_bid_panel and first_deal_bid_panel.visible:
-		_hide_first_deal_bid_panel()
+		# The icon bar is shared between 首局抢注 (implicit pass = keep dealing)
+		# and 后续定主 (needs an explicit skip so bidding advances). Route
+		# accordingly so back-press never softlocks the phase.
+		if waiting_for_input and not first_game_dealing:
+			_on_bid_skip()
+		else:
+			_hide_first_deal_bid_panel()
 		return
 	_back_request_in_flight = true
 	_return_to_main_menu()
@@ -208,6 +222,28 @@ func _build_ui() -> void:
 	# Felt oval (decorative center)
 	var felt := _create_table_felt()
 	add_child(felt)
+
+	# Overlay CanvasLayer for modal panels. Layer 10 keeps modals above every
+	# regular Control (which sit on the default layer 0). Isolating them from
+	# the main VBoxContainer avoids fullscreen stretch quirks where the modal
+	# gets rendered empty / clipped despite having z_index.
+	overlay_layer = CanvasLayer.new()
+	overlay_layer.layer = 10
+	add_child(overlay_layer)
+
+	# Modal backdrop: full-viewport dim behind any modal panel that lives on
+	# overlay_layer. Blocks clicks on the underlying UI (top bar aux buttons,
+	# preview overlay, etc.). Added first so subsequent panels draw above it.
+	modal_backdrop = ColorRect.new()
+	modal_backdrop.color = Color(0, 0, 0, 0.42)
+	modal_backdrop.set_anchors_preset(PRESET_FULL_RECT)
+	modal_backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+	modal_backdrop.visible = false
+	# Click-outside-to-dismiss: only meaningful for the preview overlay (an
+	# informational modal). Settlement/bid require explicit button choice, so
+	# their backdrop clicks are silently consumed by the STOP mouse filter.
+	modal_backdrop.gui_input.connect(_on_modal_backdrop_input)
+	overlay_layer.add_child(modal_backdrop)
 
 	# Root layout
 	var root := VBoxContainer.new()
@@ -275,7 +311,7 @@ func _build_ui() -> void:
 	# === Bid panel (overlay, initially hidden) ===
 	bid_panel = _build_bid_panel()
 	bid_panel.visible = false
-	add_child(bid_panel)
+	overlay_layer.add_child(bid_panel)
 
 	# === First-deal bid bar (above hand) ===
 	first_deal_bid_panel = _build_first_deal_bid_panel()
@@ -499,10 +535,16 @@ func _build_table_center() -> Control:
 		center_card_slots[seat] = slot
 
 	preview_panel = _build_preview_panel()
-	center.add_child(preview_panel)
-
 	settlement_panel = _build_settlement_panel()
-	add_child(settlement_panel)
+	# Push modal panels onto the overlay CanvasLayer so they render above
+	# everything (including fullscreen-stretched main layout) regardless of
+	# how the underlying VBoxContainer reflows.
+	if overlay_layer:
+		overlay_layer.add_child(preview_panel)
+		overlay_layer.add_child(settlement_panel)
+	else:
+		add_child(preview_panel)
+		add_child(settlement_panel)
 
 	center.resized.connect(_position_center_slots)
 	return center
@@ -525,37 +567,26 @@ func _position_center_slots() -> void:
 	center_card_slots[1].position = Vector2(cx + hoff - slot_w * 0.5, cy - slot_h * 0.5)
 	# West (seat 3) — left
 	center_card_slots[3].position = Vector2(cx - hoff - slot_w * 0.5, cy - slot_h * 0.5)
-	if preview_panel:
-		preview_panel.position = Vector2(cx - 310.0, cy - 150.0)
 
 
-func _build_preview_panel() -> PanelContainer:
-	var panel := PanelContainer.new()
+# Preview overlay uses the same card size as the actual play slots so
+# 上一轮 visually mirrors where cards were originally played (image 2).
+const PREVIEW_CARD_SIZE := Vector2(PLAYED_CARD_W, PLAYED_CARD_H)
+const PREVIEW_CARD_STEP := 24.0
+
+func _build_preview_panel() -> Control:
+	# Plain full-viewport Control (no PanelContainer / no background) so cards
+	# appear "on the table" instead of inside a bounded modal panel. Clicks on
+	# empty areas fall through IGNORE mouse filter to the backdrop below,
+	# which dismisses the preview.
+	var panel := Control.new()
 	panel.visible = false
 	panel.mouse_filter = MOUSE_FILTER_IGNORE
-	panel.custom_minimum_size = Vector2(620, 240)
-	panel.size = panel.custom_minimum_size
+	panel.set_anchors_preset(PRESET_FULL_RECT)
 
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.04, 0.08, 0.06, 0.88)
-	style.border_color = Color(0.95, 0.82, 0.45, 0.6)
-	style.border_width_top = 2
-	style.border_width_bottom = 2
-	style.border_width_left = 2
-	style.border_width_right = 2
-	style.corner_radius_top_left = 10
-	style.corner_radius_top_right = 10
-	style.corner_radius_bottom_left = 10
-	style.corner_radius_bottom_right = 10
-	style.content_margin_left = 14
-	style.content_margin_right = 14
-	style.content_margin_top = 10
-	style.content_margin_bottom = 10
-	panel.add_theme_stylebox_override("panel", style)
-
-	preview_content = VBoxContainer.new()
+	preview_content = Control.new()
 	preview_content.mouse_filter = MOUSE_FILTER_IGNORE
-	preview_content.add_theme_constant_override("separation", 8)
+	preview_content.set_anchors_preset(PRESET_FULL_RECT)
 	panel.add_child(preview_content)
 	return panel
 
@@ -833,12 +864,25 @@ func _refresh_first_deal_bid_bar() -> void:
 	_clear_first_deal_bid_buttons()
 	first_deal_bid_panel.visible = true
 
+	_populate_bid_icon_bar(
+		first_deal_bid_buttons,
+		bids,
+		Callable(self, "_on_first_deal_bid_chosen")
+	)
+
+
+# Fill an HBoxContainer with a 4-suit + NT icon bid bar.
+# `bids` should already be compressed (one strongest bid per trump choice);
+# any missing suit renders a disabled/gray slot so the row's shape is stable.
+# `on_choose` is invoked with the picked BidDeclaration when the user taps
+# an enabled slot.
+func _populate_bid_icon_bar(container: HBoxContainer, bids: Array, on_choose: Callable) -> void:
 	for suit: int in [Card.Suit.SPADE, Card.Suit.HEART, Card.Suit.CLUB, Card.Suit.DIAMOND]:
-		_add_first_deal_bid_button(_bid_for_suit(bids, suit), suit)
-	_add_first_deal_bid_button(_bid_for_suit(bids, -1), -1)
+		_add_bid_icon_button(container, _bid_for_suit(bids, suit), suit, on_choose)
+	_add_bid_icon_button(container, _bid_for_suit(bids, -1), -1, on_choose)
 
 
-func _add_first_deal_bid_button(bid: TrumpBidding.BidDeclaration, choice: int) -> void:
+func _add_bid_icon_button(container: HBoxContainer, bid: TrumpBidding.BidDeclaration, choice: int, on_choose: Callable) -> void:
 	var available := bid != null
 	var bg := Color(0.93, 0.92, 0.88) if available else Color(0.16, 0.18, 0.22)
 	var is_no_trump := choice == -1
@@ -868,9 +912,9 @@ func _add_first_deal_bid_button(bid: TrumpBidding.BidDeclaration, choice: int) -
 	else:
 		var chosen := bid
 		btn.pressed.connect(func() -> void:
-			_on_first_deal_bid_chosen(chosen)
+			on_choose.call(chosen)
 		)
-	first_deal_bid_buttons.add_child(btn)
+	container.add_child(btn)
 
 
 func _load_suit_icon(suit: int, available: bool) -> Texture2D:
@@ -1067,40 +1111,40 @@ func _finish_bidding() -> void:
 
 
 func _show_bid_options(bids: Array) -> void:
+	# Subsequent 定主 UI: reuse the compact icon bar built for 首局抢注
+	# instead of the modal PanelContainer. The bidding *logic* is unchanged —
+	# an enabled icon still calls `_on_bid_selected` (which handles all phases),
+	# and a dedicated 不亮 button preserves the pass path so
+	# `_process_next_bidder` can advance.
 	waiting_for_input = true
 	if first_game_dealing:
 		hand_display.show_hand(visible_deal_hands[human_seat], false)
 	else:
 		_refresh_hand_display(false)
 
-	var content := bid_panel.get_node("BidContent")
-	for child: Node in content.get_children():
-		child.queue_free()
+	# Make sure the old modal bid panel isn't still around from a previous flow.
+	_hide_bid_panel()
 
-	var title := Label.new()
-	title.text = "选择亮主"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 18)
-	title.add_theme_color_override("font_color", Color(1, 0.95, 0.7))
-	content.add_child(title)
+	# Compress to strongest-bid-per-trump-choice so each icon maps to a single
+	# unambiguous declaration (matches first-deal semantics).
+	var compressed := _strongest_bids_by_trump_choice(bids)
 
-	var btn_row := HBoxContainer.new()
-	btn_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	btn_row.add_theme_constant_override("separation", 12)
-	content.add_child(btn_row)
-
-	for i: int in range(bids.size()):
-		var b: TrumpBidding.BidDeclaration = bids[i]
-		var btn := _make_styled_button(TrumpBidding.bid_label(b), _get_suit_button_color(b))
-		var idx := i
-		btn.pressed.connect(func() -> void: _on_bid_selected(bids, idx))
-		btn_row.add_child(btn)
+	_clear_first_deal_bid_buttons()
+	_populate_bid_icon_bar(
+		first_deal_bid_buttons,
+		compressed,
+		func(decl: TrumpBidding.BidDeclaration) -> void:
+			_on_bid_selected([decl], 0)
+	)
 
 	var skip_btn := _make_styled_button("不亮", Color(0.4, 0.4, 0.4))
+	skip_btn.custom_minimum_size = Vector2(64, 56)
+	skip_btn.add_theme_font_size_override("font_size", 15)
 	skip_btn.pressed.connect(_on_bid_skip)
-	btn_row.add_child(skip_btn)
+	first_deal_bid_buttons.add_child(skip_btn)
 
-	bid_panel.visible = true
+	first_deal_bid_panel.visible = true
+	_set_message("请选择亮主")
 
 
 func _on_bid_selected(bids: Array, index: int) -> void:
@@ -1110,6 +1154,7 @@ func _on_bid_selected(bids: Array, index: int) -> void:
 	var decl: TrumpBidding.BidDeclaration = bids[index]
 	_log("你亮主: %s" % TrumpBidding.bid_label(decl))
 	_hide_bid_panel()
+	_hide_first_deal_bid_panel()
 	if first_game_dealing:
 		pending_first_bid = decl
 		_set_message("你已抢主: %s" % TrumpBidding.bid_label(decl))
@@ -1118,6 +1163,7 @@ func _on_bid_selected(bids: Array, index: int) -> void:
 		_sync_host_from_controller()
 		_finish_bidding_round()
 	else:
+		_set_message("")
 		session_controller.submit_bid_or_pass(human_seat, decl)
 		_sync_host_from_controller()
 		_finish_bidding()
@@ -1129,12 +1175,14 @@ func _on_bid_skip() -> void:
 	waiting_for_input = false
 	_log("你选择不亮")
 	_hide_bid_panel()
+	_hide_first_deal_bid_panel()
 	if first_game_dealing:
 		_set_message("继续发牌")
 	elif is_first_game:
 		session_controller.submit_bid_or_pass(human_seat, null, "player_choice")
 		_finish_bidding_round()
 	else:
+		_set_message("")
 		session_controller.submit_bid_or_pass(human_seat, null, "player_choice")
 		_bid_seat_index += 1
 		_process_next_bidder()
@@ -1142,6 +1190,7 @@ func _on_bid_skip() -> void:
 
 func _hide_bid_panel() -> void:
 	bid_panel.visible = false
+	_refresh_modal_backdrop()
 
 
 # ============================================================
@@ -1321,6 +1370,7 @@ func _show_counter_options(ctx: Dictionary) -> void:
 	btn_row.add_child(pass_btn)
 
 	bid_panel.visible = true
+	_refresh_modal_backdrop()
 
 
 func _on_counter_selected(bids: Array, index: int) -> void:
@@ -1509,7 +1559,15 @@ func _resolve_trick() -> void:
 func _finish_round() -> void:
 	_clear_turn_highlights()
 	var finish := session_controller.finish_round()
+	if not finish.get("ok", false):
+		push_error("[gui_game] finish_round failed: %s" % finish.get("error", "unknown"))
+		_log("[color=red]结算失败: %s[/color]" % finish.get("error", "unknown"))
+		return
 	var settlement: EffectiveSettlement = finish["settlement"]
+	if settlement == null:
+		push_error("[gui_game] settlement is null in finish payload: %s" % str(finish))
+		_log("[color=red]结算数据为空[/color]")
+		return
 	_sync_host_from_controller()
 
 	_clear_table_cards()
@@ -1762,8 +1820,44 @@ func _hide_settlement_panel() -> void:
 	if settlement_panel:
 		settlement_panel.visible = false
 	if settlement_content:
+		# 同帧移除并释放：queue_free 会延迟到帧末，若紧接着 add_child 新内容，
+		# 旧节点仍在 VBoxContainer 里参与布局，可能造成一帧的"空内容/错位"。
 		for child: Node in settlement_content.get_children():
+			settlement_content.remove_child(child)
 			child.queue_free()
+	_refresh_modal_backdrop()
+
+
+# Backdrop is visible iff at least one modal panel on overlay_layer is visible.
+func _refresh_modal_backdrop() -> void:
+	if modal_backdrop == null:
+		return
+	var any_modal_visible := false
+	if settlement_panel and settlement_panel.visible:
+		any_modal_visible = true
+	if bid_panel and bid_panel.visible:
+		any_modal_visible = true
+	if preview_panel and preview_panel.visible:
+		any_modal_visible = true
+	modal_backdrop.visible = any_modal_visible
+
+
+func _on_modal_backdrop_input(event: InputEvent) -> void:
+	if not (event is InputEventMouseButton):
+		return
+	var mb := event as InputEventMouseButton
+	if not (mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT):
+		return
+	# Only dismiss the preview overlay. Settlement/bid must be closed via
+	# their in-panel buttons (an accidental click outside must not skip past
+	# a settlement/bid decision).
+	if settlement_panel and settlement_panel.visible:
+		return
+	if bid_panel and bid_panel.visible:
+		return
+	if preview_panel and preview_panel.visible:
+		_hide_preview_panel()
+		accept_event()
 
 
 func _populate_settlement_panel(
@@ -1772,11 +1866,27 @@ func _populate_settlement_panel(
 		summary_text: String,
 		team_name: String,
 	) -> void:
+	if settlement_panel == null:
+		push_error("[gui_game] settlement_panel is null; cannot show settlement")
+		return
+
 	_hide_settlement_panel()
+
+	# CRITICAL: set panel size/position BEFORE adding autowrap Label children.
+	# 之前的 bug：add_child 时 Label 尚未获得 VBox 分配的宽度，autowrap 按 width=0
+	# 计算 minimum size（每字一行）→ PanelContainer minimum 被撑到 1500+ 像素，
+	# 后续 panel.size = (480,280) 也被 clamp 回去。第二局特别明显因为跨局重用。
+	# 先把面板/内容 VBox 定型再灌内容，Label autowrap 就能拿到 432 的正确宽度。
+	_position_overlay_panel(settlement_panel, Vector2(480, 280))
+	# Also pin the content VBox min-width so autowrap has a stable target even
+	# if a future PanelContainer sort hasn't propagated yet.
+	settlement_content.custom_minimum_size = Vector2(432, 0)
 
 	var title := Label.new()
 	title.text = "本局结算"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.custom_minimum_size = Vector2(432, 0)
+	title.size_flags_horizontal = SIZE_EXPAND_FILL
 	title.add_theme_font_size_override("font_size", 28)
 	title.add_theme_color_override("font_color", Color(1.0, 0.88, 0.45))
 	settlement_content.add_child(title)
@@ -1797,6 +1907,37 @@ func _populate_settlement_panel(
 			Card.rank_symbol(team_ranks[0]), Card.rank_symbol(team_ranks[1])])
 
 	settlement_panel.visible = true
+	settlement_panel.move_to_front()
+	settlement_panel.queue_sort()
+	settlement_content.queue_sort()
+	_refresh_modal_backdrop()
+	call_deferred("_debug_dump_settlement_panel")
+
+
+func _debug_dump_settlement_panel() -> void:
+	if settlement_panel == null or settlement_content == null:
+		return
+	# Re-center using the Container's *final* size (after sort_children ran).
+	# The initial position pass used the target size (480, 280), but the panel
+	# grows to fit its content minimum (~400 tall) so the panel ended up biased
+	# toward the bottom of the viewport. This second pass fixes that.
+	var vp := get_viewport_rect().size
+	var final_size := settlement_panel.size
+	settlement_panel.position = Vector2(
+		(vp.x - final_size.x) * 0.5,
+		(vp.y - final_size.y) * 0.5,
+	)
+	var parent_name := "<none>"
+	if settlement_panel.get_parent():
+		parent_name = String(settlement_panel.get_parent().name)
+	print("[gui_game] settlement panel state: parent=%s visible=%s children=%d panel_rect=%s content_rect=%s viewport=%s" % [
+		parent_name,
+		str(settlement_panel.visible),
+		settlement_content.get_child_count(),
+		str(settlement_panel.get_rect()),
+		str(settlement_content.get_rect()),
+		str(get_viewport_rect().size),
+	])
 
 
 func _add_settlement_action_buttons(game_over: bool) -> void:
@@ -1835,6 +1976,10 @@ func _add_settlement_line(text: String, emphasized: bool = false) -> void:
 	var lbl := Label.new()
 	lbl.text = text
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# custom_minimum_size 明确告诉 Label 目标宽度（等于 VBox 可用宽度），autowrap
+	# 会按 432 计算最小高度而不是 width=0 的一字一行，防止面板高度失控。
+	lbl.custom_minimum_size = Vector2(432, 0)
+	lbl.size_flags_horizontal = SIZE_EXPAND_FILL
 	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	lbl.add_theme_font_size_override("font_size", 22 if emphasized else 17)
 	lbl.add_theme_color_override(
@@ -1894,24 +2039,39 @@ func _show_bottom_preview() -> void:
 
 
 func _show_preview_overlay(title: String, rows: Array[Dictionary]) -> void:
+	# 底牌 overlay (row layout). Cards laid out horizontally on the viewport,
+	# each row centered horizontally and stacked around the vertical middle.
 	if preview_panel == null or preview_content == null:
 		return
 	preview_token += 1
 	var token := preview_token
 	_clear_preview_content()
 
-	var title_label := Label.new()
-	title_label.text = title
-	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_label.add_theme_font_size_override("font_size", 17)
-	title_label.add_theme_color_override("font_color", Color(1.0, 0.93, 0.65))
-	preview_content.add_child(title_label)
+	var vp := get_viewport_rect().size
+	var cx := vp.x * 0.5
+	var cy := vp.y * 0.5
 
-	for row: Dictionary in rows:
-		var cards: Array = row.get("cards", []) as Array
-		_add_preview_row(str(row.get("label", "")), cards)
+	_add_preview_title(title, cx, PREVIEW_TITLE_Y)
+
+	var card_h: float = PREVIEW_CARD_SIZE.y
+	var row_gap := 48.0
+	var count := rows.size()
+	var gap_slots: float = float(maxi(0, count - 1))
+	var total_h: float = count * card_h + gap_slots * row_gap
+	var start_row_center_y: float = cy - total_h * 0.5 + card_h * 0.5
+
+	for i in range(count):
+		var row_data: Dictionary = rows[i]
+		var cards: Array = row_data.get("cards", []) as Array
+		var label_text: String = str(row_data.get("label", ""))
+		var row_center := Vector2(cx, start_row_center_y + i * (card_h + row_gap))
+		_place_preview_row(label_text, cards, row_center)
+
+	_add_preview_hint(cx, cy + total_h * 0.5 + 56)
 
 	preview_panel.visible = true
+	preview_panel.move_to_front()
+	_refresh_modal_backdrop()
 	get_tree().create_timer(3.0).timeout.connect(func() -> void:
 		if token == preview_token:
 			_hide_preview_panel()
@@ -1919,107 +2079,200 @@ func _show_preview_overlay(title: String, rows: Array[Dictionary]) -> void:
 
 
 func _show_previous_trick_overlay() -> void:
+	# 上一轮出牌 overlay (cross layout). Cards positioned exactly where they
+	# were played in the last trick — north/south along vertical axis, east/
+	# west along horizontal axis (mirrors _position_center_slots geometry).
 	if preview_panel == null or preview_content == null:
 		return
 	preview_token += 1
 	var token := preview_token
 	_clear_preview_content()
 
-	var title_label := Label.new()
-	title_label.text = "上一轮出牌"
-	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_label.add_theme_font_size_override("font_size", 17)
-	title_label.add_theme_color_override("font_color", Color(1.0, 0.93, 0.65))
-	preview_content.add_child(title_label)
+	var vp := get_viewport_rect().size
+	var cx := vp.x * 0.5
+	var cy := vp.y * 0.5
+	# Wider spread than the live play slots to give preview cards breathing
+	# room around the (bigger, unstacked) label + card group.
+	var hoff := maxf(220.0, vp.x * 0.26)
+	var voff := maxf(160.0, vp.y * 0.30)
 
-	var north := HBoxContainer.new()
-	north.alignment = BoxContainer.ALIGNMENT_CENTER
-	north.mouse_filter = MOUSE_FILTER_IGNORE
-	preview_content.add_child(north)
-	_add_preview_hand(north, "上", last_trick_plays_snapshot.get(2, []) as Array)
+	_add_preview_title("上一轮出牌", cx, PREVIEW_TITLE_Y)
 
-	var middle := HBoxContainer.new()
-	middle.alignment = BoxContainer.ALIGNMENT_CENTER
-	middle.mouse_filter = MOUSE_FILTER_IGNORE
-	middle.add_theme_constant_override("separation", 48)
-	preview_content.add_child(middle)
-	_add_preview_hand(middle, "左", last_trick_plays_snapshot.get(3, []) as Array)
-	_add_preview_hand(middle, "右", last_trick_plays_snapshot.get(1, []) as Array)
+	# Seat → label, direction of label relative to card group
+	_place_preview_seat("上", last_trick_plays_snapshot.get(2, []) as Array,
+		Vector2(cx, cy - voff), _PreviewLabelSide.ABOVE)
+	_place_preview_seat("下", last_trick_plays_snapshot.get(0, []) as Array,
+		Vector2(cx, cy + voff), _PreviewLabelSide.BELOW)
+	_place_preview_seat("左", last_trick_plays_snapshot.get(3, []) as Array,
+		Vector2(cx - hoff, cy), _PreviewLabelSide.LEFT)
+	_place_preview_seat("右", last_trick_plays_snapshot.get(1, []) as Array,
+		Vector2(cx + hoff, cy), _PreviewLabelSide.RIGHT)
 
-	var south := HBoxContainer.new()
-	south.alignment = BoxContainer.ALIGNMENT_CENTER
-	south.mouse_filter = MOUSE_FILTER_IGNORE
-	preview_content.add_child(south)
-	_add_preview_hand(south, "下", last_trick_plays_snapshot.get(0, []) as Array)
+	_add_preview_hint(cx, vp.y - 60)
 
 	preview_panel.visible = true
+	preview_panel.move_to_front()
+	_refresh_modal_backdrop()
 	get_tree().create_timer(3.0).timeout.connect(func() -> void:
 		if token == preview_token:
 			_hide_preview_panel()
 	)
 
 
-func _add_preview_row(label_text: String, cards: Array) -> void:
-	var row := HBoxContainer.new()
-	row.mouse_filter = MOUSE_FILTER_IGNORE
-	row.add_theme_constant_override("separation", 6)
-	preview_content.add_child(row)
+# Common helper to center an overlay panel on the current viewport, bypassing
+# anchors (which are unreliable across CanvasLayer reparenting + fullscreen
+# stretch, as documented in the settlement panel fix).
+func _position_overlay_panel(panel: Control, target_size: Vector2) -> void:
+	var vp := get_viewport_rect().size
+	panel.set_anchors_preset(PRESET_TOP_LEFT)
+	panel.size = target_size
+	panel.position = Vector2(
+		(vp.x - target_size.x) * 0.5,
+		(vp.y - target_size.y) * 0.5,
+	)
 
-	var label := Label.new()
-	label.text = "%s:" % label_text
-	label.custom_minimum_size = Vector2(76, 0)
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", 14)
-	label.add_theme_color_override("font_color", Color(0.90, 0.90, 0.82))
-	row.add_child(label)
 
-	if cards.is_empty():
+const PREVIEW_TITLE_Y := 32.0
+const PREVIEW_LABEL_GAP := 12.0
+
+enum _PreviewLabelSide { ABOVE, BELOW, LEFT, RIGHT }
+
+
+func _add_preview_title(text: String, cx: float, y: float) -> void:
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	lbl.add_theme_font_size_override("font_size", 30)
+	lbl.add_theme_color_override("font_color", Color(1.0, 0.93, 0.65))
+	lbl.size = Vector2(560, 44)
+	lbl.position = Vector2(cx - 280, y)
+	preview_content.add_child(lbl)
+
+
+func _add_preview_hint(cx: float, y: float) -> void:
+	var lbl := Label.new()
+	lbl.text = "点击任意处关闭 · 3 秒后自动消失"
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	lbl.add_theme_font_size_override("font_size", 15)
+	lbl.add_theme_color_override("font_color", Color(0.75, 0.78, 0.72))
+	lbl.size = Vector2(500, 22)
+	lbl.position = Vector2(cx - 250, y)
+	preview_content.add_child(lbl)
+
+
+# Place a horizontal row of cards + label around a given viewport center point.
+# Used by 底牌 (rows stacked vertically) and can be reused elsewhere.
+func _place_preview_row(label_text: String, cards: Array, row_center: Vector2) -> void:
+	var card_w: float = PREVIEW_CARD_SIZE.x
+	var card_h: float = PREVIEW_CARD_SIZE.y
+	var count := cards.size()
+	var gap_slots: float = float(maxi(0, count - 1))
+	var cards_w: float = 0.0
+	if count > 0:
+		cards_w = count * card_w + gap_slots * PREVIEW_CARD_STEP
+	var start_x: float = row_center.x - cards_w * 0.5
+	var top_y: float = row_center.y - card_h * 0.5
+
+	var lbl := Label.new()
+	lbl.text = "%s:" % label_text
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	lbl.add_theme_font_size_override("font_size", 22)
+	lbl.add_theme_color_override("font_color", Color(1.0, 0.93, 0.65))
+	lbl.size = Vector2(120, card_h)
+	lbl.position = Vector2(start_x - 132, top_y)
+	preview_content.add_child(lbl)
+
+	if count == 0:
 		var empty := Label.new()
 		empty.text = "无"
 		empty.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		empty.mouse_filter = MOUSE_FILTER_IGNORE
+		empty.add_theme_font_size_override("font_size", 20)
 		empty.add_theme_color_override("font_color", Color(0.75, 0.75, 0.75))
-		row.add_child(empty)
+		empty.size = Vector2(80, card_h)
+		empty.position = Vector2(row_center.x - 40, top_y)
+		preview_content.add_child(empty)
 		return
 
-	for card: Card in cards:
+	for i in range(count):
+		var card: Card = cards[i]
 		var cv = _CardViewClass.new()
 		cv.setup(card, true, _is_trump(card))
 		cv.disabled = true
 		cv.mouse_filter = MOUSE_FILTER_IGNORE
-		cv.custom_minimum_size = Vector2(42, 60)
-		cv.size = Vector2(42, 60)
-		row.add_child(cv)
+		cv.custom_minimum_size = PREVIEW_CARD_SIZE
+		cv.size = PREVIEW_CARD_SIZE
+		cv.position = Vector2(start_x + i * (card_w + PREVIEW_CARD_STEP), top_y)
+		preview_content.add_child(cv)
 
 
-func _add_preview_hand(parent: Control, label_text: String, cards: Array) -> void:
-	var hand := HBoxContainer.new()
-	hand.mouse_filter = MOUSE_FILTER_IGNORE
-	hand.add_theme_constant_override("separation", 4)
-	parent.add_child(hand)
+# Place a seat's card group centered at position `center` with a label placed
+# on the given side of the cards (matches the seat's physical direction).
+func _place_preview_seat(label_text: String, cards: Array, center: Vector2, side: int) -> void:
+	var card_w: float = PREVIEW_CARD_SIZE.x
+	var card_h: float = PREVIEW_CARD_SIZE.y
+	var count := cards.size()
 
-	var label := Label.new()
-	label.text = "%s:" % label_text
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", 14)
-	label.add_theme_color_override("font_color", Color(0.90, 0.90, 0.82))
-	hand.add_child(label)
-
-	if cards.is_empty():
+	if count == 0:
+		# No cards from this seat — draw a subtle "无" marker so all four
+		# positions still read as a cross.
 		var empty := Label.new()
 		empty.text = "无"
+		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		empty.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		empty.add_theme_color_override("font_color", Color(0.75, 0.75, 0.75))
-		hand.add_child(empty)
+		empty.mouse_filter = MOUSE_FILTER_IGNORE
+		empty.add_theme_font_size_override("font_size", 18)
+		empty.add_theme_color_override("font_color", Color(0.55, 0.55, 0.55))
+		empty.size = Vector2(80, 30)
+		empty.position = Vector2(center.x - 40, center.y - 15)
+		preview_content.add_child(empty)
+		_add_preview_seat_label(label_text, center, side, Vector2(card_w, card_h))
 		return
 
-	for card: Card in cards:
+	# Cards stacked horizontally centered on `center`.
+	var gap_slots: float = float(maxi(0, count - 1))
+	var cards_w: float = count * card_w + gap_slots * PREVIEW_CARD_STEP
+	var start_x: float = center.x - cards_w * 0.5
+	var top_y: float = center.y - card_h * 0.5
+
+	for i in range(count):
+		var card: Card = cards[i]
 		var cv = _CardViewClass.new()
 		cv.setup(card, true, _is_trump(card))
 		cv.disabled = true
 		cv.mouse_filter = MOUSE_FILTER_IGNORE
-		cv.custom_minimum_size = Vector2(36, 52)
-		cv.size = Vector2(36, 52)
-		hand.add_child(cv)
+		cv.custom_minimum_size = PREVIEW_CARD_SIZE
+		cv.size = PREVIEW_CARD_SIZE
+		cv.position = Vector2(start_x + i * (card_w + PREVIEW_CARD_STEP), top_y)
+		preview_content.add_child(cv)
+
+	# Label anchored to the outer side of the group.
+	_add_preview_seat_label(label_text, center, side, Vector2(cards_w, card_h))
+
+
+func _add_preview_seat_label(text: String, center: Vector2, side: int, group_size: Vector2) -> void:
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.mouse_filter = MOUSE_FILTER_IGNORE
+	lbl.add_theme_font_size_override("font_size", 24)
+	lbl.add_theme_color_override("font_color", Color(1.0, 0.93, 0.65))
+	lbl.size = Vector2(64, 34)
+	match side:
+		_PreviewLabelSide.ABOVE:
+			lbl.position = Vector2(center.x - 32, center.y - group_size.y * 0.5 - 34 - PREVIEW_LABEL_GAP)
+		_PreviewLabelSide.BELOW:
+			lbl.position = Vector2(center.x - 32, center.y + group_size.y * 0.5 + PREVIEW_LABEL_GAP)
+		_PreviewLabelSide.LEFT:
+			lbl.position = Vector2(center.x - group_size.x * 0.5 - 64 - PREVIEW_LABEL_GAP, center.y - 17)
+		_PreviewLabelSide.RIGHT:
+			lbl.position = Vector2(center.x + group_size.x * 0.5 + PREVIEW_LABEL_GAP, center.y - 17)
+	preview_content.add_child(lbl)
 
 
 func _hide_preview_panel() -> void:
@@ -2027,6 +2280,7 @@ func _hide_preview_panel() -> void:
 	if preview_panel:
 		preview_panel.visible = false
 	_clear_preview_content()
+	_refresh_modal_backdrop()
 
 
 func _clear_preview_content() -> void:
@@ -2197,16 +2451,6 @@ func _hide_first_deal_bid_panel() -> void:
 func _clear_actions() -> void:
 	for child: Node in action_bar.get_children():
 		child.queue_free()
-
-
-func _get_suit_button_color(decl: TrumpBidding.BidDeclaration) -> Color:
-	match decl.suit:
-		Card.Suit.HEART, Card.Suit.DIAMOND:
-			return Color(0.8, 0.2, 0.2)
-		Card.Suit.SPADE, Card.Suit.CLUB:
-			return Color(0.25, 0.35, 0.55)
-		_:
-			return Color(0.6, 0.4, 0.1)
 
 
 # ============================================================
