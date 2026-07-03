@@ -26,6 +26,16 @@ const SUIT_ICON_PATHS := {
 	Card.Suit.DIAMOND: "res://assets/ui/suits/suit_diamond_%s.svg",
 }
 
+## Maps the unicode suit glyph to its Bootstrap-Icons SVG (colored variant), so
+## any UI text that contains ♠♥♣♦ can be rendered as an inline image via
+## RichTextLabel BBCode. Keep in sync with SUIT_ICON_PATHS.
+const SUIT_GLYPH_TO_SVG := {
+	"♠": "res://assets/ui/suits/suit_spade_colored.svg",
+	"♥": "res://assets/ui/suits/suit_heart_colored.svg",
+	"♣": "res://assets/ui/suits/suit_club_colored.svg",
+	"♦": "res://assets/ui/suits/suit_diamond_colored.svg",
+}
+
 # ============================================================
 # UI node references (built in _ready)
 # ============================================================
@@ -51,7 +61,7 @@ var preview_content: VBoxContainer
 var settlement_panel: PanelContainer
 var settlement_content: VBoxContainer
 var hand_area_panel: PanelContainer
-var message_label: Label
+var message_label: RichTextLabel
 var log_panel: RichTextLabel
 
 # ============================================================
@@ -243,12 +253,17 @@ func _build_ui() -> void:
 	table_center.size_flags_vertical = SIZE_EXPAND_FILL
 	center_col.add_child(table_center)
 
-	# Message area (below table center)
-	message_label = Label.new()
-	message_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	message_label.add_theme_font_size_override("font_size", 16)
-	message_label.add_theme_color_override("font_color", Color(1, 0.95, 0.7))
-	message_label.custom_minimum_size = Vector2(0, 26)
+	# Message area (below table center). RichTextLabel with bbcode so we can
+	# render inline suit SVGs via [img=..]res://...svg[/img].
+	message_label = RichTextLabel.new()
+	message_label.bbcode_enabled = true
+	message_label.fit_content = true
+	message_label.scroll_active = false
+	message_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	message_label.add_theme_font_size_override("normal_font_size", 16)
+	message_label.add_theme_color_override("default_color", Color(1, 0.95, 0.7))
+	message_label.custom_minimum_size = Vector2(0, 28)
+	message_label.size_flags_horizontal = SIZE_EXPAND_FILL
 	center_col.add_child(message_label)
 
 	# Right seat (East/seat 1)
@@ -319,18 +334,33 @@ func _build_info_bar() -> HBoxContainer:
 
 	# Key info (级/主) is emphasized with larger, brighter text so players can
 	# read the current rank and trump at a glance; secondary info stays muted.
+	# The `trump` slot uses RichTextLabel so we can inline suit SVG icons via
+	# bbcode ([img]...[/img]) instead of relying on unicode ♠♥♣♦ glyphs.
 	for key: String in ["rank", "trump", "dealer", "score", "round"]:
-		var lbl := Label.new()
-		if key == "rank" or key == "trump":
+		var node: Control
+		if key == "trump":
+			var rtl := RichTextLabel.new()
+			rtl.bbcode_enabled = true
+			rtl.fit_content = true
+			rtl.scroll_active = false
+			rtl.autowrap_mode = TextServer.AUTOWRAP_OFF
+			rtl.add_theme_font_size_override("normal_font_size", 24)
+			rtl.add_theme_color_override("default_color", Color(1.0, 0.92, 0.45))
+			node = rtl
+		elif key == "rank":
+			var lbl := Label.new()
 			lbl.add_theme_font_size_override("font_size", 24)
 			lbl.add_theme_color_override("font_color", Color(1.0, 0.92, 0.45))
 			lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
 			lbl.add_theme_constant_override("outline_size", 4)
+			node = lbl
 		else:
-			lbl.add_theme_font_size_override("font_size", 15)
-			lbl.add_theme_color_override("font_color", Color(0.82, 0.80, 0.68))
-		bar.add_child(lbl)
-		info_labels[key] = lbl
+			var lbl2 := Label.new()
+			lbl2.add_theme_font_size_override("font_size", 15)
+			lbl2.add_theme_color_override("font_color", Color(0.82, 0.80, 0.68))
+			node = lbl2
+		bar.add_child(node)
+		info_labels[key] = node
 
 	previous_trick_btn = _make_styled_button("上一轮", Color(0.25, 0.45, 0.65))
 	previous_trick_btn.disabled = true
@@ -1612,7 +1642,7 @@ func _update_info() -> void:
 	if info_labels.has("rank"):
 		info_labels["rank"].text = "级: %s" % Card.rank_symbol(current_rank)
 	if info_labels.has("trump"):
-		info_labels["trump"].text = "主: %s" % trump
+		var trump_node: Control = info_labels["trump"]
 		var trump_color := Color(1.0, 0.92, 0.45)
 		if game_round:
 			match game_round.trump_suit:
@@ -1620,7 +1650,12 @@ func _update_info() -> void:
 					trump_color = Color(1.0, 0.5, 0.45)
 				Card.Suit.SPADE, Card.Suit.CLUB:
 					trump_color = Color(0.7, 0.88, 1.0)
-		info_labels["trump"].add_theme_color_override("font_color", trump_color)
+		if trump_node is RichTextLabel:
+			(trump_node as RichTextLabel).text = "主: %s" % _apply_suit_bbcode(trump, 26)
+			trump_node.add_theme_color_override("default_color", trump_color)
+		else:
+			(trump_node as Label).text = "主: %s" % trump
+			trump_node.add_theme_color_override("font_color", trump_color)
 	if info_labels.has("dealer"):
 		info_labels["dealer"].text = "庄家: %s" % dealer_name
 	if info_labels.has("score"):
@@ -1655,7 +1690,11 @@ func _update_seat_counts() -> void:
 
 
 func _set_message(msg: String) -> void:
-	message_label.text = msg
+	if msg.is_empty():
+		message_label.text = ""
+		return
+	# Center via bbcode since RichTextLabel has no horizontal_alignment field.
+	message_label.text = "[center]%s[/center]" % _apply_suit_bbcode(msg)
 
 
 func _clear_turn_highlights() -> void:
@@ -2051,7 +2090,21 @@ func _log(msg: String) -> void:
 		ui_log_lines.remove_at(0)
 	if log_panel and debug_ui_enabled:
 		log_panel.clear()
-		log_panel.append_text("\n".join(ui_log_lines) + "\n")
+		log_panel.append_text(_apply_suit_bbcode("\n".join(ui_log_lines) + "\n"))
+
+
+## Replaces ♠♥♣♦ glyphs in a string with inline SVG image bbcode. Used to
+## make UI text render the shared Bootstrap-Icons suit sprites instead of
+## relying on the system's colored-emoji fallback on Android.
+func _apply_suit_bbcode(text: String, size_px: int = 18) -> String:
+	if text.is_empty():
+		return text
+	var out := text
+	for glyph: String in SUIT_GLYPH_TO_SVG.keys():
+		if not (glyph in out):
+			continue
+		out = out.replace(glyph, "[img=%d]%s[/img]" % [size_px, SUIT_GLYPH_TO_SVG[glyph]])
+	return out
 
 
 func _auto_save_log() -> void:
