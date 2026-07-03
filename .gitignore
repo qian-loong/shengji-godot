@@ -12,7 +12,9 @@ Desktop.ini
 # === Claude Code Local ===
 .claude/settings.local.json
 CLAUDE.local.md
+AGENTS.local.md
 production/session-logs/
+.git-commit-msg.txt
 
 # === Internal Planning (not for public) ===
 
@@ -38,6 +40,8 @@ bin/
 obj/
 out/
 dist/
+*.apk
+*.idsig
 *.exe
 *.dll
 *.so
@@ -46,8 +50,10 @@ dist/
 
 # === Engine: Godot ===
 .godot/
+src/godot/android/
 *.translation
 export_presets.cfg
+!src/godot/export_presets.cfg
 # Uncomment if using Godot:
 # *.import
 

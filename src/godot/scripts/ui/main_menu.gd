@@ -6,6 +6,25 @@ func _ready() -> void:
 	_build_ui()
 
 
+func _unhandled_input(event: InputEvent) -> void:
+	if not _is_back_input(event):
+		return
+	get_tree().quit()
+	get_viewport().set_input_as_handled()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		get_tree().quit()
+		get_viewport().set_input_as_handled()
+
+
+func _is_back_input(event: InputEvent) -> bool:
+	if event.is_action_pressed("ui_cancel"):
+		return true
+	return event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_BACK
+
+
 func _build_ui() -> void:
 	var bg := ColorRect.new()
 	bg.color = Color(0.06, 0.08, 0.12)

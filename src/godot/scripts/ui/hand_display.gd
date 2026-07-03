@@ -9,11 +9,20 @@ signal selection_changed(count: int)
 
 const CARD_W: float = 70.0
 const CARD_H: float = 100.0
-const SELECT_RISE: float = 18.0
+const CARD_RATIO: float = 140.0 / 190.0  # matches Kenney card art aspect
+const CARD_H_MIN: float = 90.0
+const CARD_H_MAX: float = 172.0
+const HAND_TOP_PAD: float = 6.0
+const HAND_BOTTOM_PAD: float = 16.0  # keep card bottom (rank + 主 badge) off the screen edge
+const SELECT_RISE_RATIO: float = 0.18
 const MIN_OVERLAP: float = 0.35
-const MAX_OVERLAP: float = 0.7
-const CARD_SPACING_MIN: float = CARD_W * (1.0 - MAX_OVERLAP)
-const CARD_SPACING_MAX: float = CARD_W * (1.0 - MIN_OVERLAP)
+const MAX_OVERLAP: float = 0.72
+
+## Card size is computed from the control height so the hand scales with the
+## available space (high-res phones no longer show tiny cards).
+var _card_w: float = CARD_W
+var _card_h: float = CARD_H
+var _rise_px: float = 0.0
 
 var card_views: Array = []
 var _cards: Array = []
@@ -28,7 +37,7 @@ var _sort_callback: Callable = Callable()
 
 
 func _ready() -> void:
-	clip_contents = false
+	clip_contents = true
 	_card_view_class = load("res://scripts/ui/card_view.gd")
 
 
@@ -117,28 +126,49 @@ func _on_card_clicked(cv) -> void:
 	selection_changed.emit(_selected_indices.size())
 
 
+func _compute_card_size() -> void:
+	var rise_budget := CARD_H_MAX * SELECT_RISE_RATIO
+	var h := clampf(
+		size.y - HAND_TOP_PAD - HAND_BOTTOM_PAD - rise_budget,
+		CARD_H_MIN,
+		CARD_H_MAX
+	)
+	_card_h = h
+	_card_w = h * CARD_RATIO
+	_rise_px = _card_h * SELECT_RISE_RATIO
+
+
 func _layout_cards() -> void:
 	if card_views.is_empty():
 		return
 
+	_compute_card_size()
+	var rise := _rise_px
+	var card_top_min := HAND_TOP_PAD
+	var card_bottom := size.y - HAND_BOTTOM_PAD
 	var count := card_views.size()
 	var available_width := size.x
 
-	var spacing := CARD_W
+	var spacing := _card_w
 	if count > 1:
-		var max_total := available_width - CARD_W
-		spacing = minf(CARD_SPACING_MAX, max_total / (count - 1))
-		spacing = maxf(CARD_SPACING_MIN, spacing)
+		var max_total := available_width - _card_w
+		var spacing_max := _card_w * (1.0 - MIN_OVERLAP)
+		var spacing_min := _card_w * (1.0 - MAX_OVERLAP)
+		spacing = minf(spacing_max, max_total / (count - 1))
+		spacing = maxf(spacing_min, spacing)
 
-	var total_width := CARD_W + spacing * (count - 1) if count > 1 else CARD_W
+	var total_width := _card_w + spacing * (count - 1) if count > 1 else _card_w
 	var start_x := (available_width - total_width) * 0.5
 
 	for i: int in range(count):
 		var cv = card_views[i]
+		cv.custom_minimum_size = Vector2(_card_w, _card_h)
+		cv.size = Vector2(_card_w, _card_h)
 		var x := start_x + spacing * i
-		var y := size.y - CARD_H
+		var y := card_bottom - _card_h
 		if i in _selected_indices:
-			y -= SELECT_RISE
+			y -= rise
+		y = maxf(y, card_top_min)
 		cv.position = Vector2(x, y)
 		cv.z_index = i
 

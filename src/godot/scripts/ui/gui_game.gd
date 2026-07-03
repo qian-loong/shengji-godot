@@ -4,11 +4,27 @@
 extends Control
 
 const SEAT_NAMES: Array[String] = ["你(南)", "AI-东", "搭档(北)", "AI-西"]
-const TABLE_BG_COLOR := Color(0.08, 0.30, 0.15)
-const TABLE_FELT_COLOR := Color(0.10, 0.38, 0.18)
+const TABLE_BG_COLOR := Color(0.05, 0.13, 0.09)
+const TABLE_FELT_COLOR := Color(0.11, 0.42, 0.22)
+const TABLE_FELT_EDGE := Color(0.62, 0.46, 0.20)
+
+## Played cards in the center trick area — larger than the base card so the
+## current trick is clearly readable.
+const PLAYED_CARD_W := 104.0
+const PLAYED_CARD_H := 141.0
+const PLAYED_CARD_STEP := 30.0
+const SEAT_CARD_H := 72.0
+const SEAT_CARD_W := SEAT_CARD_H * (140.0 / 190.0)
 
 var _CardViewClass: GDScript
 var _HandDisplayClass: GDScript
+
+const SUIT_ICON_PATHS := {
+	Card.Suit.SPADE:   "res://assets/ui/suits/suit_spade_%s.svg",
+	Card.Suit.HEART:   "res://assets/ui/suits/suit_heart_%s.svg",
+	Card.Suit.CLUB:    "res://assets/ui/suits/suit_club_%s.svg",
+	Card.Suit.DIAMOND: "res://assets/ui/suits/suit_diamond_%s.svg",
+}
 
 # ============================================================
 # UI node references (built in _ready)
@@ -20,13 +36,21 @@ var center_card_slots: Dictionary = {}  # seat -> Control
 var seat_panels: Dictionary = {}        # seat -> Control
 var seat_name_labels: Dictionary = {}   # seat -> Label
 var seat_count_labels: Dictionary = {}  # seat -> Label
+var seat_dealer_badges: Dictionary = {} # seat -> Control (庄)
+var seat_bid_badges: Dictionary = {}    # seat -> Control (亮)
+var seat_card_backs: Dictionary = {}    # seat -> CardView (mini back)
 var hand_display = null
 var action_bar: HBoxContainer
+var first_deal_bid_panel: PanelContainer
+var first_deal_bid_buttons: HBoxContainer
 var bid_panel: PanelContainer
 var previous_trick_btn: Button
 var bottom_btn: Button
 var preview_panel: PanelContainer
 var preview_content: VBoxContainer
+var settlement_panel: PanelContainer
+var settlement_content: VBoxContainer
+var hand_area_panel: PanelContainer
 var message_label: Label
 var log_panel: RichTextLabel
 
@@ -69,6 +93,13 @@ var last_trick_plays_snapshot: Dictionary = {}
 var human_bottom_received_snapshot: Array = []
 var human_buried_bottom_snapshot: Array = []
 var preview_token: int = 0
+var active_turn_seat: int = -1
+var seat_panel_base_styles: Dictionary = {}
+var hand_area_base_style: StyleBoxFlat
+
+const HAND_ACTION_BAR_H := 48.0
+const SEAT_ACTIVE_BORDER := Color(1.0, 0.88, 0.35, 0.95)
+const SEAT_WINNER_BORDER := Color(1.0, 0.72, 0.12, 1.0)
 
 const UI_LOG_MAX_LINES: int = 200
 var ui_log_lines: Array[String] = []
@@ -90,6 +121,67 @@ func _parse_cli_args() -> void:
 			debug_ui_enabled = true
 		elif arg == "--hide-debug-ui":
 			debug_ui_enabled = false
+
+
+var _back_request_in_flight: bool = false
+# Android delivers a single back press as both NOTIFICATION_WM_GO_BACK_REQUEST
+# and a KEY_BACK / ui_cancel input event in the same frame. Without this guard
+# the first path would dismiss an overlay and the second would immediately
+# proceed to the main menu, so a single press would skip two steps.
+var _back_consumed_frame: int = -1
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not _is_back_input(event):
+		return
+	# Consume BEFORE handling: change_scene_to_file() removes this Control
+	# from the tree, after which get_viewport() would be null.
+	var vp := get_viewport()
+	if vp:
+		vp.set_input_as_handled()
+	_handle_back_request()
+
+
+func _is_back_input(event: InputEvent) -> bool:
+	if event.is_action_pressed("ui_cancel"):
+		return true
+	return event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_BACK
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		_handle_back_request()
+
+
+func _handle_back_request() -> void:
+	if _back_request_in_flight:
+		return
+	var frame := Engine.get_process_frames()
+	if _back_consumed_frame == frame:
+		return
+	_back_consumed_frame = frame
+
+	if preview_panel and preview_panel.visible:
+		_hide_preview_panel()
+		return
+	if bid_panel and bid_panel.visible:
+		# Hiding the panel alone leaves waiting_for_input=true and never
+		# notifies the SessionController, softlocking the bidding phase.
+		# Treat back as a deliberate skip so the round can advance.
+		if waiting_for_input:
+			_on_bid_skip()
+		else:
+			_hide_bid_panel()
+		return
+	if first_deal_bid_panel and first_deal_bid_panel.visible:
+		_hide_first_deal_bid_panel()
+		return
+	_back_request_in_flight = true
+	_return_to_main_menu()
+
+
+func _return_to_main_menu() -> void:
+	get_tree().change_scene_to_file("res://scenes/main/main_menu.tscn")
 
 
 # ============================================================
@@ -170,19 +262,35 @@ func _build_ui() -> void:
 	bid_panel.visible = false
 	add_child(bid_panel)
 
-	# === Action bar ===
+	# === First-deal bid bar (above hand) ===
+	first_deal_bid_panel = _build_first_deal_bid_panel()
+	first_deal_bid_panel.visible = false
+	root.add_child(first_deal_bid_panel)
+
+	# === Hand action strip (fixed row above hand — does not steal hand width) ===
 	action_bar = HBoxContainer.new()
 	action_bar.alignment = BoxContainer.ALIGNMENT_CENTER
 	action_bar.add_theme_constant_override("separation", 16)
-	action_bar.custom_minimum_size = Vector2(0, 44)
+	action_bar.custom_minimum_size = Vector2(0, HAND_ACTION_BAR_H)
+	action_bar.size_flags_horizontal = SIZE_EXPAND_FILL
+	action_bar.mouse_filter = Control.MOUSE_FILTER_PASS
 	root.add_child(action_bar)
 
-	# === Hand area ===
+	# === Hand area (full width; selected-card rise stays inside via clip + rise budget) ===
 	hand_display = _HandDisplayClass.new()
-	hand_display.custom_minimum_size = Vector2(0, 130)
+	hand_display.custom_minimum_size = Vector2(0, _hand_area_min_height())
 	hand_display.size_flags_horizontal = SIZE_EXPAND_FILL
 	hand_display.selection_changed.connect(_on_hand_selection_changed)
-	root.add_child(hand_display)
+	hand_area_panel = PanelContainer.new()
+	hand_area_panel.size_flags_horizontal = SIZE_EXPAND_FILL
+	hand_area_panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	hand_area_base_style = StyleBoxFlat.new()
+	hand_area_base_style.bg_color = Color(0, 0, 0, 0)
+	hand_area_base_style.set_corner_radius_all(10)
+	hand_area_base_style.set_border_width_all(0)
+	hand_area_panel.add_theme_stylebox_override("panel", hand_area_base_style)
+	hand_area_panel.add_child(hand_display)
+	root.add_child(hand_area_panel)
 
 	# === Log panel (compact, at very bottom) ===
 	log_panel = RichTextLabel.new()
@@ -209,10 +317,18 @@ func _build_info_bar() -> HBoxContainer:
 	bg.content_margin_bottom = 4
 	bar.add_theme_stylebox_override("panel", bg)
 
+	# Key info (级/主) is emphasized with larger, brighter text so players can
+	# read the current rank and trump at a glance; secondary info stays muted.
 	for key: String in ["rank", "trump", "dealer", "score", "round"]:
 		var lbl := Label.new()
-		lbl.add_theme_font_size_override("font_size", 16)
-		lbl.add_theme_color_override("font_color", Color(0.95, 0.90, 0.75))
+		if key == "rank" or key == "trump":
+			lbl.add_theme_font_size_override("font_size", 24)
+			lbl.add_theme_color_override("font_color", Color(1.0, 0.92, 0.45))
+			lbl.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.6))
+			lbl.add_theme_constant_override("outline_size", 4)
+		else:
+			lbl.add_theme_font_size_override("font_size", 15)
+			lbl.add_theme_color_override("font_color", Color(0.82, 0.80, 0.68))
 		bar.add_child(lbl)
 		info_labels[key] = lbl
 
@@ -229,6 +345,30 @@ func _build_info_bar() -> HBoxContainer:
 	return bar
 
 
+func _build_first_deal_bid_panel() -> PanelContainer:
+	# Shrinks to hug the suit buttons (no full-width background / side whitespace).
+	var panel := PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.04, 0.14, 0.08, 0.92)
+	sb.border_color = Color(0.62, 0.46, 0.20, 0.55)
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(8)
+	sb.content_margin_left = 8
+	sb.content_margin_right = 8
+	sb.content_margin_top = 4
+	sb.content_margin_bottom = 4
+	panel.add_theme_stylebox_override("panel", sb)
+
+	first_deal_bid_buttons = HBoxContainer.new()
+	first_deal_bid_buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	first_deal_bid_buttons.add_theme_constant_override("separation", 8)
+	panel.add_child(first_deal_bid_buttons)
+
+	return panel
+
+
 func _build_seat_panel(seat: int) -> PanelContainer:
 	var panel := PanelContainer.new()
 	var style := StyleBoxFlat.new()
@@ -242,11 +382,26 @@ func _build_seat_panel(seat: int) -> PanelContainer:
 	style.content_margin_top = 6
 	style.content_margin_bottom = 6
 	panel.add_theme_stylebox_override("panel", style)
+	seat_panel_base_styles[seat] = style.duplicate()
 
 	var vbox := VBoxContainer.new()
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	vbox.add_theme_constant_override("separation", 4)
 	panel.add_child(vbox)
+
+	# Badge row (庄 = dealer, 亮 = trump declarer), toggled at runtime.
+	var badge_row := HBoxContainer.new()
+	badge_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	badge_row.add_theme_constant_override("separation", 4)
+	vbox.add_child(badge_row)
+
+	var dealer_badge := _make_seat_badge("庄", Color(0.85, 0.62, 0.15))
+	badge_row.add_child(dealer_badge)
+	seat_dealer_badges[seat] = dealer_badge
+
+	var bid_badge := _make_seat_badge("亮", Color(0.20, 0.55, 0.85))
+	badge_row.add_child(bid_badge)
+	seat_bid_badges[seat] = bid_badge
 
 	var name_lbl := Label.new()
 	name_lbl.text = SEAT_NAMES[seat]
@@ -264,21 +419,46 @@ func _build_seat_panel(seat: int) -> PanelContainer:
 	vbox.add_child(count_lbl)
 	seat_count_labels[seat] = count_lbl
 
-	# Card back (mini) for AI
+	# Kenney card back at seat — keep 140:190 aspect; don't let the panel stretch it.
 	var card_back = _CardViewClass.new()
-	card_back.custom_minimum_size = Vector2(40, 56)
-	card_back.size = Vector2(40, 56)
+	card_back.custom_minimum_size = Vector2(SEAT_CARD_W, SEAT_CARD_H)
+	card_back.size = Vector2(SEAT_CARD_W, SEAT_CARD_H)
+	card_back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	card_back.face_up = false
 	card_back.disabled = true
 	vbox.add_child(card_back)
+	seat_card_backs[seat] = card_back
 
 	seat_panels[seat] = panel
 	return panel
 
 
+## Small rounded pill badge (e.g. 庄/亮) shown on a seat panel header.
+func _make_seat_badge(text: String, color: Color) -> Control:
+	var badge := PanelContainer.new()
+	badge.visible = false
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = color
+	sb.set_corner_radius_all(7)
+	sb.content_margin_left = 6
+	sb.content_margin_right = 6
+	sb.content_margin_top = 1
+	sb.content_margin_bottom = 1
+	badge.add_theme_stylebox_override("panel", sb)
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.add_theme_font_size_override("font_size", 13)
+	lbl.add_theme_color_override("font_color", Color(1, 1, 1))
+	badge.add_child(lbl)
+	return badge
+
+
 func _build_table_center() -> Control:
 	var center := Control.new()
-	center.custom_minimum_size = Vector2(400, 200)
+	# Keep the vertical minimum modest; the center expands to fill spare space and
+	# played cards may overflow the slot. A large min here can push the hand row
+	# off the bottom of the screen on shorter effective heights.
+	center.custom_minimum_size = Vector2(480, 200)
 
 	# 4 slots for played cards, positioned relative to center
 	for seat: int in [0, 1, 2, 3]:
@@ -291,6 +471,9 @@ func _build_table_center() -> Control:
 	preview_panel = _build_preview_panel()
 	center.add_child(preview_panel)
 
+	settlement_panel = _build_settlement_panel()
+	add_child(settlement_panel)
+
 	center.resized.connect(_position_center_slots)
 	return center
 
@@ -298,10 +481,11 @@ func _build_table_center() -> Control:
 func _position_center_slots() -> void:
 	var cx := table_center.size.x * 0.5
 	var cy := table_center.size.y * 0.5
-	var slot_w: float = 90.0
-	var slot_h: float = 110.0
-	var hoff := 80.0
-	var voff := 55.0
+	var slot_w: float = PLAYED_CARD_W
+	var slot_h: float = PLAYED_CARD_H
+	# Spread played cards toward each seat, scaling with the available area.
+	var hoff := maxf(130.0, table_center.size.x * 0.24)
+	var voff := maxf(95.0, table_center.size.y * 0.30)
 
 	# South (seat 0) — bottom center
 	center_card_slots[0].position = Vector2(cx - slot_w * 0.5, cy + voff - slot_h * 0.5)
@@ -346,6 +530,35 @@ func _build_preview_panel() -> PanelContainer:
 	return panel
 
 
+func _build_settlement_panel() -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.visible = false
+	panel.mouse_filter = MOUSE_FILTER_STOP
+	panel.set_anchors_preset(PRESET_CENTER)
+	panel.set_anchor_and_offset(SIDE_LEFT, 0.5, -240)
+	panel.set_anchor_and_offset(SIDE_RIGHT, 0.5, 240)
+	panel.set_anchor_and_offset(SIDE_TOP, 0.5, -150)
+	panel.set_anchor_and_offset(SIDE_BOTTOM, 0.5, 130)
+	panel.z_index = 20
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.05, 0.10, 0.08, 0.96)
+	style.border_color = Color(0.95, 0.82, 0.45, 0.85)
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(14)
+	style.content_margin_left = 24
+	style.content_margin_right = 24
+	style.content_margin_top = 18
+	style.content_margin_bottom = 18
+	panel.add_theme_stylebox_override("panel", style)
+
+	settlement_content = VBoxContainer.new()
+	settlement_content.add_theme_constant_override("separation", 10)
+	settlement_content.alignment = BoxContainer.ALIGNMENT_CENTER
+	panel.add_child(settlement_content)
+	return panel
+
+
 func _build_bid_panel() -> PanelContainer:
 	var panel := PanelContainer.new()
 	panel.set_anchors_preset(PRESET_CENTER)
@@ -380,14 +593,26 @@ func _build_bid_panel() -> PanelContainer:
 	return panel
 
 
-func _create_table_felt() -> ColorRect:
-	var felt := ColorRect.new()
-	felt.color = TABLE_FELT_COLOR
-	felt.set_anchors_preset(PRESET_CENTER)
-	felt.set_anchor_and_offset(SIDE_LEFT, 0.1, 0)
-	felt.set_anchor_and_offset(SIDE_RIGHT, 0.9, 0)
-	felt.set_anchor_and_offset(SIDE_TOP, 0.08, 0)
-	felt.set_anchor_and_offset(SIDE_BOTTOM, 0.6, 0)
+func _create_table_felt() -> Control:
+	# Rounded felt "table" panel spanning most of the play region, with a soft
+	# wood-tone border so it reads as a real card table instead of a flat block.
+	var felt := Panel.new()
+	felt.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	felt.set_anchors_preset(PRESET_FULL_RECT)
+	felt.set_anchor_and_offset(SIDE_LEFT, 0.03, 0)
+	felt.set_anchor_and_offset(SIDE_RIGHT, 0.97, 0)
+	felt.set_anchor_and_offset(SIDE_TOP, 0.11, 0)
+	felt.set_anchor_and_offset(SIDE_BOTTOM, 0.72, 0)
+
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = TABLE_FELT_COLOR
+	sb.border_color = TABLE_FELT_EDGE
+	sb.set_border_width_all(6)
+	sb.set_corner_radius_all(48)
+	sb.shadow_color = Color(0, 0, 0, 0.45)
+	sb.shadow_size = 12
+	sb.anti_aliasing = true
+	felt.add_theme_stylebox_override("panel", sb)
 	return felt
 
 
@@ -399,6 +624,8 @@ func _start_new_game() -> void:
 	ui_log_lines = []
 	if log_panel:
 		log_panel.clear()
+	_hide_settlement_panel()
+	_clear_turn_highlights()
 
 	rule_config = RuleConfig.new()
 	rule_config.deck_count = 2
@@ -435,6 +662,8 @@ func _start_new_game() -> void:
 
 
 func _start_round() -> void:
+	_hide_settlement_panel()
+	_clear_turn_highlights()
 	round_num += 1
 	current_rank = team_ranks[current_dealer % 2]
 	rule_config.current_rank = current_rank
@@ -482,10 +711,11 @@ func _start_first_game_deal() -> void:
 	session_controller.current_phase = "bidding"
 	_clear_actions()
 	_hide_bid_panel()
+	_hide_first_deal_bid_panel()
 	_refresh_first_deal_bid_bar()
 	_update_visible_deal_counts()
 	hand_display.show_hand([], false)
-	_set_message("首局发牌中，可抢主")
+	_set_message("")
 	_log("[color=green]— 首局发牌中抢主 —[/color]")
 	_deal_next_visible_card()
 
@@ -517,8 +747,9 @@ func _deal_next_visible_card() -> void:
 			if decl != null:
 				pending_first_bid = decl
 				_clear_actions()
-				_log("%s 抢主: %s" % [SEAT_NAMES[seat], TrumpBidding.bid_label(decl)])
+				_hide_first_deal_bid_panel()
 				_set_message("%s 已抢主: %s" % [SEAT_NAMES[seat], TrumpBidding.bid_label(decl)])
+				_log("%s 抢主: %s" % [SEAT_NAMES[seat], TrumpBidding.bid_label(decl)])
 
 	get_tree().create_timer(DEAL_STEP_SECONDS).timeout.connect(_deal_next_visible_card)
 
@@ -529,6 +760,7 @@ func _finish_first_game_deal() -> void:
 	waiting_for_input = false
 	visible_first_bid_choices = []
 	_clear_actions()
+	_hide_first_deal_bid_panel()
 	hand_display.show_hand(game_round.get_hand(human_seat), false)
 	_update_seat_counts()
 
@@ -568,31 +800,76 @@ func _refresh_first_deal_bid_bar() -> void:
 
 	waiting_for_input = true
 	visible_first_bid_choices = bids.duplicate()
-	_clear_actions()
-
-	var title := Label.new()
-	title.text = "抢主"
-	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 16)
-	title.add_theme_color_override("font_color", Color(1, 0.95, 0.7))
-	action_bar.add_child(title)
+	_clear_first_deal_bid_buttons()
+	first_deal_bid_panel.visible = true
 
 	for suit: int in [Card.Suit.SPADE, Card.Suit.HEART, Card.Suit.CLUB, Card.Suit.DIAMOND]:
-		_add_first_deal_bid_button(_bid_for_suit(bids, suit), Card.suit_symbol(suit), _base_suit_button_color(suit))
-	_add_first_deal_bid_button(_bid_for_suit(bids, -1), "NT", Color(0.6, 0.4, 0.1))
+		_add_first_deal_bid_button(_bid_for_suit(bids, suit), suit)
+	_add_first_deal_bid_button(_bid_for_suit(bids, -1), -1)
 
 
-func _add_first_deal_bid_button(bid: TrumpBidding.BidDeclaration, fallback_label: String, color: Color) -> void:
-	var btn := _make_styled_button(fallback_label if bid == null else _first_deal_bid_button_label(bid), color)
-	btn.custom_minimum_size = Vector2(78, 40)
-	if bid == null:
+func _add_first_deal_bid_button(bid: TrumpBidding.BidDeclaration, choice: int) -> void:
+	var available := bid != null
+	var bg := Color(0.93, 0.92, 0.88) if available else Color(0.16, 0.18, 0.22)
+	var is_no_trump := choice == -1
+
+	var btn: Button
+	if is_no_trump:
+		btn = _make_styled_button("NT", bg)
+		var glyph_color := Color(0.95, 0.82, 0.35) if available else Color(0.44, 0.46, 0.50)
+		btn.add_theme_font_size_override("font_size", 22)
+		btn.add_theme_color_override("font_color", glyph_color)
+		btn.add_theme_color_override("font_hover_color", glyph_color)
+		btn.add_theme_color_override("font_pressed_color", glyph_color)
+		btn.add_theme_color_override("font_disabled_color", glyph_color)
+	else:
+		btn = Button.new()
+		btn.text = ""
+		btn.icon = _load_suit_icon(choice, available)
+		btn.expand_icon = true
+		btn.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		btn.vertical_icon_alignment = VERTICAL_ALIGNMENT_CENTER
+		btn.add_theme_constant_override("icon_max_width", 40)
+		_apply_bid_button_style(btn, bg)
+	btn.custom_minimum_size = Vector2(56, 56)
+
+	if not available:
 		btn.disabled = true
 	else:
 		var chosen := bid
 		btn.pressed.connect(func() -> void:
 			_on_first_deal_bid_chosen(chosen)
 		)
-	action_bar.add_child(btn)
+	first_deal_bid_buttons.add_child(btn)
+
+
+func _load_suit_icon(suit: int, available: bool) -> Texture2D:
+	if not SUIT_ICON_PATHS.has(suit):
+		return null
+	var variant := "colored" if available else "gray"
+	var path: String = (SUIT_ICON_PATHS[suit] as String) % variant
+	var tex: Texture2D = load(path)
+	return tex
+
+
+func _apply_bid_button_style(btn: Button, bg: Color) -> void:
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = bg
+	normal.set_corner_radius_all(6)
+	normal.content_margin_left = 6
+	normal.content_margin_right = 6
+	normal.content_margin_top = 6
+	normal.content_margin_bottom = 6
+	btn.add_theme_stylebox_override("normal", normal)
+	var hover := normal.duplicate()
+	hover.bg_color = bg.lightened(0.06)
+	btn.add_theme_stylebox_override("hover", hover)
+	var pressed := normal.duplicate()
+	pressed.bg_color = bg.darkened(0.10)
+	btn.add_theme_stylebox_override("pressed", pressed)
+	var disabled := normal.duplicate()
+	disabled.bg_color = bg
+	btn.add_theme_stylebox_override("disabled", disabled)
 
 
 func _on_first_deal_bid_chosen(decl: TrumpBidding.BidDeclaration) -> void:
@@ -601,9 +878,8 @@ func _on_first_deal_bid_chosen(decl: TrumpBidding.BidDeclaration) -> void:
 	waiting_for_input = false
 	visible_first_bid_choices = []
 	pending_first_bid = decl
-	_clear_actions()
+	_hide_first_deal_bid_panel()
 	_log("你抢主: %s" % TrumpBidding.bid_label(decl))
-	_set_message("你已抢主: %s" % TrumpBidding.bid_label(decl))
 
 
 func _bid_choice_key(bid: TrumpBidding.BidDeclaration) -> String:
@@ -638,34 +914,15 @@ func _bid_for_suit(bids: Array, suit: int) -> TrumpBidding.BidDeclaration:
 	return null
 
 
-func _first_deal_bid_button_label(bid: TrumpBidding.BidDeclaration) -> String:
-	if bid.bid_type == TrumpBidding.BidType.PAIR_JOKER or bid.suit < 0:
-		return "NT 公主"
-	return "%s %s" % [Card.suit_symbol(bid.suit), _bid_type_short_label(bid.bid_type)]
-
-
-func _bid_type_short_label(bid_type: int) -> String:
-	match bid_type:
-		TrumpBidding.BidType.SINGLE_RANK:
-			return "单"
-		TrumpBidding.BidType.PAIR_RANK:
-			return "对"
-		TrumpBidding.BidType.JOKER_SINGLE_RANK:
-			return "王+单"
-		TrumpBidding.BidType.JOKER_PAIR_RANK:
-			return "王+对"
-		_:
-			return ""
-
-
 func _base_suit_button_color(suit: int) -> Color:
+	# Glyph (font) color for an available choice — true card colors on a light face.
 	match suit:
 		Card.Suit.HEART, Card.Suit.DIAMOND:
-			return Color(0.8, 0.2, 0.2)
+			return Color(0.82, 0.12, 0.12)
 		Card.Suit.SPADE, Card.Suit.CLUB:
-			return Color(0.25, 0.35, 0.55)
+			return Color(0.10, 0.10, 0.12)
 		_:
-			return Color(0.6, 0.4, 0.1)
+			return Color(0.6, 0.45, 0.05)
 
 
 func _first_deal_choices_match(bids: Array) -> bool:
@@ -890,7 +1147,7 @@ func _start_bury() -> void:
 
 func _show_bury_actions() -> void:
 	_clear_actions()
-	var confirm_btn := _make_styled_button("确认扣底 (0/%d)" % rule_config.bottom_size, Color(0.2, 0.7, 0.3))
+	var confirm_btn := _make_hand_action_button("扣底 0/%d" % rule_config.bottom_size, Color(0.2, 0.7, 0.3))
 	confirm_btn.name = "ConfirmBury"
 	confirm_btn.pressed.connect(_on_bury_confirm)
 	action_bar.add_child(confirm_btn)
@@ -900,7 +1157,7 @@ func _on_hand_selection_changed(count: int) -> void:
 	if current_phase == "burying":
 		var confirm := action_bar.get_node_or_null("ConfirmBury")
 		if confirm is Button:
-			(confirm as Button).text = "确认扣底 (%d/%d)" % [count, rule_config.bottom_size]
+			(confirm as Button).text = "扣底 %d/%d" % [count, rule_config.bottom_size]
 
 
 func _on_bury_confirm() -> void:
@@ -1084,6 +1341,7 @@ func _start_play_phase() -> void:
 
 func _start_next_trick() -> void:
 	_hide_preview_panel()
+	_clear_turn_highlights()
 	if game_round.get_hand_size(0) <= 0:
 		_finish_round()
 		return
@@ -1113,6 +1371,7 @@ func _process_next_player() -> void:
 		return
 
 	var seat: int = turn["seat"]
+	_set_turn_highlight(seat)
 	if seat == human_seat:
 		_show_play_options(seat)
 	else:
@@ -1146,7 +1405,7 @@ func _show_play_options(seat: int) -> void:
 	_refresh_hand_display(true)
 
 	_clear_actions()
-	var play_btn := _make_styled_button("出牌", Color(0.2, 0.7, 0.3))
+	var play_btn := _make_hand_action_button("出牌", Color(0.2, 0.7, 0.3))
 	play_btn.name = "PlayConfirm"
 	play_btn.pressed.connect(_on_play_confirm)
 	action_bar.add_child(play_btn)
@@ -1201,16 +1460,24 @@ func _resolve_trick() -> void:
 	_log("  → %s 赢墩 (%s) | 本墩: %d 分 | 攻方总分: %d" % [
 		winner_name, side, result["score"], result["attack_score"]])
 
+	_highlight_trick_winner(result["winner"])
+	_set_message("%s 赢墩 | +%d 分 | 攻方 %d 分" % [
+		winner_name, result["score"], result["attack_score"]])
+
 	_update_info()
 	_update_aux_buttons()
 
 	if result["is_last"]:
-		get_tree().create_timer(1.0).timeout.connect(_finish_round)
+		get_tree().create_timer(1.4).timeout.connect(_finish_round)
 	else:
-		get_tree().create_timer(0.8).timeout.connect(_start_next_trick)
+		get_tree().create_timer(1.4).timeout.connect(func() -> void:
+			_clear_turn_highlights()
+			_start_next_trick()
+		)
 
 
 func _finish_round() -> void:
+	_clear_turn_highlights()
 	var finish := session_controller.finish_round()
 	var settlement: EffectiveSettlement = finish["settlement"]
 	_sync_host_from_controller()
@@ -1254,27 +1521,19 @@ func _show_settlement(settlement: EffectiveSettlement, finish: Dictionary) -> vo
 		summary_text = "攻方下庄"
 	else:
 		summary_text = "庄家方守住"
-	_set_message("得分: %d | %s" % [settlement.final_score, summary_text])
+
+	_populate_settlement_panel(settlement, finish, summary_text, team_name)
+	_add_settlement_action_buttons(settlement.game_over)
+	_set_message("")
 
 	_auto_save_log()
 
 	if settlement.game_over:
 		_log("\n[color=gold]游戏结束！%s 获胜！[/color]" % team_name)
 		_save_log()
-		var restart_btn := _make_styled_button("再来一局", Color(0.3, 0.7, 0.9))
-		restart_btn.pressed.connect(_start_new_game)
-		action_bar.add_child(restart_btn)
 	else:
 		_log("  南北队: %s 级 | 东西队: %s 级" % [
 			Card.rank_symbol(team_ranks[0]), Card.rank_symbol(team_ranks[1])])
-
-		var next_btn := _make_styled_button("下一局", Color(0.3, 0.7, 0.9))
-		next_btn.pressed.connect(_start_round)
-		action_bar.add_child(next_btn)
-
-		var save_btn := _make_styled_button("保存日志", Color(0.5, 0.7, 0.5))
-		save_btn.pressed.connect(_save_log)
-		action_bar.add_child(save_btn)
 
 
 # ============================================================
@@ -1326,11 +1585,13 @@ func _render_cards_in_slot(seat: int, cards: Array) -> void:
 	var offset := 0.0
 	for card: Card in cards:
 		var cv = _CardViewClass.new()
+		cv.custom_minimum_size = Vector2(PLAYED_CARD_W, PLAYED_CARD_H)
+		cv.size = Vector2(PLAYED_CARD_W, PLAYED_CARD_H)
 		cv.setup(card, true, _is_trump(card))
 		cv.disabled = true
 		cv.position = Vector2(offset, 0)
 		slot.add_child(cv)
-		offset += 22.0
+		offset += PLAYED_CARD_STEP
 
 
 func _clear_table_cards() -> void:
@@ -1352,6 +1613,14 @@ func _update_info() -> void:
 		info_labels["rank"].text = "级: %s" % Card.rank_symbol(current_rank)
 	if info_labels.has("trump"):
 		info_labels["trump"].text = "主: %s" % trump
+		var trump_color := Color(1.0, 0.92, 0.45)
+		if game_round:
+			match game_round.trump_suit:
+				Card.Suit.HEART, Card.Suit.DIAMOND:
+					trump_color = Color(1.0, 0.5, 0.45)
+				Card.Suit.SPADE, Card.Suit.CLUB:
+					trump_color = Color(0.7, 0.88, 1.0)
+		info_labels["trump"].add_theme_color_override("font_color", trump_color)
 	if info_labels.has("dealer"):
 		info_labels["dealer"].text = "庄家: %s" % dealer_name
 	if info_labels.has("score"):
@@ -1364,24 +1633,176 @@ func _update_info() -> void:
 func _update_seat_counts() -> void:
 	if game_round == null:
 		return
+	var declarer := -1
+	if game_round.bid_declaration != null:
+		declarer = game_round.bid_declaration.seat_id
 	for seat: int in [1, 2, 3]:
+		var count := game_round.get_hand_size(seat)
 		if seat_count_labels.has(seat):
-			var count := game_round.get_hand_size(seat)
 			seat_count_labels[seat].text = "%d 张" % count
-	# Update dealer markers
-	for seat: int in [1, 2, 3]:
+		# Hide the card-back stack once a seat has emptied its hand.
+		if seat_card_backs.has(seat):
+			seat_card_backs[seat].visible = count > 0
+		var is_dealer := seat == game_round.dealer_seat
 		if seat_name_labels.has(seat):
-			var base := SEAT_NAMES[seat]
-			if seat == game_round.dealer_seat:
-				seat_name_labels[seat].text = base + " [庄]"
-				seat_name_labels[seat].add_theme_color_override("font_color", Color(1, 0.85, 0.3))
-			else:
-				seat_name_labels[seat].text = base
-				seat_name_labels[seat].add_theme_color_override("font_color", Color(0.85, 0.85, 0.85))
+			seat_name_labels[seat].text = SEAT_NAMES[seat]
+			var name_color := Color(1, 0.85, 0.3) if is_dealer else Color(0.85, 0.85, 0.85)
+			seat_name_labels[seat].add_theme_color_override("font_color", name_color)
+		if seat_dealer_badges.has(seat):
+			seat_dealer_badges[seat].visible = is_dealer
+		if seat_bid_badges.has(seat):
+			seat_bid_badges[seat].visible = declarer == seat
 
 
 func _set_message(msg: String) -> void:
 	message_label.text = msg
+
+
+func _clear_turn_highlights() -> void:
+	active_turn_seat = -1
+	for seat: int in seat_panels:
+		_apply_seat_panel_style(seat, "normal")
+	_apply_hand_area_style("normal")
+	for seat: int in center_card_slots:
+		center_card_slots[seat].modulate = Color.WHITE
+
+
+func _set_turn_highlight(seat: int) -> void:
+	_clear_turn_highlights()
+	active_turn_seat = seat
+	if seat == human_seat:
+		_apply_hand_area_style("active")
+	elif seat_panels.has(seat):
+		_apply_seat_panel_style(seat, "active")
+
+
+func _highlight_trick_winner(winner_seat: int) -> void:
+	_clear_turn_highlights()
+	if winner_seat == human_seat:
+		_apply_hand_area_style("winner")
+	elif seat_panels.has(winner_seat):
+		_apply_seat_panel_style(winner_seat, "winner")
+	if center_card_slots.has(winner_seat):
+		center_card_slots[winner_seat].modulate = Color(1.15, 1.1, 0.82)
+
+
+func _apply_seat_panel_style(seat: int, mode: String) -> void:
+	if not seat_panels.has(seat) or not seat_panel_base_styles.has(seat):
+		return
+	var panel: PanelContainer = seat_panels[seat]
+	var style: StyleBoxFlat = (seat_panel_base_styles[seat] as StyleBoxFlat).duplicate()
+	match mode:
+		"active":
+			style.border_color = SEAT_ACTIVE_BORDER
+			style.set_border_width_all(2)
+			style.bg_color = Color(0.10, 0.32, 0.18, 0.88)
+		"winner":
+			style.border_color = SEAT_WINNER_BORDER
+			style.set_border_width_all(3)
+			style.bg_color = Color(0.16, 0.40, 0.24, 0.94)
+	panel.add_theme_stylebox_override("panel", style)
+
+
+func _apply_hand_area_style(mode: String) -> void:
+	if hand_area_panel == null or hand_area_base_style == null:
+		return
+	var style: StyleBoxFlat = hand_area_base_style.duplicate()
+	match mode:
+		"active":
+			style.border_color = SEAT_ACTIVE_BORDER
+			style.set_border_width_all(2)
+			style.bg_color = Color(0.08, 0.22, 0.14, 0.35)
+		"winner":
+			style.border_color = SEAT_WINNER_BORDER
+			style.set_border_width_all(3)
+			style.bg_color = Color(0.12, 0.30, 0.18, 0.45)
+	hand_area_panel.add_theme_stylebox_override("panel", style)
+
+
+func _hide_settlement_panel() -> void:
+	if settlement_panel:
+		settlement_panel.visible = false
+	if settlement_content:
+		for child: Node in settlement_content.get_children():
+			child.queue_free()
+
+
+func _populate_settlement_panel(
+		settlement: EffectiveSettlement,
+		finish: Dictionary,
+		summary_text: String,
+		team_name: String,
+	) -> void:
+	_hide_settlement_panel()
+
+	var title := Label.new()
+	title.text = "本局结算"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 28)
+	title.add_theme_color_override("font_color", Color(1.0, 0.88, 0.45))
+	settlement_content.add_child(title)
+
+	_add_settlement_line("出牌阶段攻方得分: %d" % settlement.attack_base_score)
+	if settlement.bottom_multiplier > 0:
+		_add_settlement_line("底牌: %d × %d 倍 = %d" % [
+			settlement.bottom_score, settlement.bottom_multiplier, settlement.bottom_bonus])
+	else:
+		_add_settlement_line("底牌不计分（庄方收墩）")
+	_add_settlement_line("最终得分: %d" % settlement.final_score, true)
+	_add_settlement_line(summary_text, true)
+
+	if settlement.game_over:
+		_add_settlement_line("%s 获胜！" % team_name, true)
+	else:
+		_add_settlement_line("南北队 %s 级 | 东西队 %s 级" % [
+			Card.rank_symbol(team_ranks[0]), Card.rank_symbol(team_ranks[1])])
+
+	settlement_panel.visible = true
+
+
+func _add_settlement_action_buttons(game_over: bool) -> void:
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0, 8)
+	settlement_content.add_child(spacer)
+
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 16)
+	settlement_content.add_child(row)
+
+	if game_over:
+		var restart_btn := _make_styled_button("再来一局", Color(0.3, 0.7, 0.9))
+		restart_btn.pressed.connect(func() -> void:
+			_hide_settlement_panel()
+			_clear_actions()
+			_start_new_game()
+		)
+		row.add_child(restart_btn)
+	else:
+		var next_btn := _make_styled_button("下一局", Color(0.3, 0.7, 0.9))
+		next_btn.pressed.connect(func() -> void:
+			_hide_settlement_panel()
+			_clear_actions()
+			_start_round()
+		)
+		row.add_child(next_btn)
+
+		var save_btn := _make_styled_button("保存日志", Color(0.5, 0.7, 0.5))
+		save_btn.pressed.connect(_save_log)
+		row.add_child(save_btn)
+
+
+func _add_settlement_line(text: String, emphasized: bool = false) -> void:
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl.add_theme_font_size_override("font_size", 22 if emphasized else 17)
+	lbl.add_theme_color_override(
+		"font_color",
+		Color(1.0, 0.92, 0.55) if emphasized else Color(0.88, 0.88, 0.82)
+	)
+	settlement_content.add_child(lbl)
 
 
 func _update_aux_buttons() -> void:
@@ -1685,7 +2106,39 @@ func _make_styled_button(text: String, color: Color) -> Button:
 
 	btn.add_theme_color_override("font_color", Color(0.95, 0.95, 0.95))
 	btn.add_theme_color_override("font_hover_color", Color(1, 1, 1))
+	btn.add_theme_color_override("font_disabled_color", Color(0.72, 0.72, 0.72))
+
+	var style_disabled := style_normal.duplicate()
+	style_disabled.bg_color = Color(0.18, 0.18, 0.2, 0.85)
+	btn.add_theme_stylebox_override("disabled", style_disabled)
 	return btn
+
+
+func _hand_area_min_height() -> float:
+	return HandDisplay.HAND_TOP_PAD + HandDisplay.HAND_BOTTOM_PAD \
+		+ HandDisplay.CARD_H_MAX * (1.0 + HandDisplay.SELECT_RISE_RATIO)
+
+
+func _make_hand_action_button(text: String, color: Color) -> Button:
+	var btn := _make_styled_button(text, color)
+	btn.custom_minimum_size = Vector2(120, 40)
+	btn.add_theme_font_size_override("font_size", 16)
+	return btn
+
+
+func _clear_first_deal_bid_buttons() -> void:
+	if first_deal_bid_buttons == null:
+		return
+	for child: Node in first_deal_bid_buttons.get_children():
+		child.queue_free()
+
+
+func _hide_first_deal_bid_panel() -> void:
+	if first_deal_bid_panel:
+		first_deal_bid_panel.visible = false
+	_clear_first_deal_bid_buttons()
+	waiting_for_input = false
+	visible_first_bid_choices = []
 
 
 func _clear_actions() -> void:
