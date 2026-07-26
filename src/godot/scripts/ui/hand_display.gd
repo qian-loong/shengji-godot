@@ -177,6 +177,14 @@ func _is_trump(card: Card) -> bool:
 	return TrumpJudge.is_trump(card, _trump_suit, _current_rank, _joker_always_trump)
 
 
+## Get the CardView node for a given card. Returns null if not found.
+func get_card_view_for_card(card: Card) -> Node:
+	var idx := _cards.find(card)
+	if idx >= 0 and idx < card_views.size():
+		return card_views[idx]
+	return null
+
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED:
 		_layout_cards()

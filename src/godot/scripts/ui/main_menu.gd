@@ -67,12 +67,12 @@ func _build_ui() -> void:
 	)
 	center.add_child(gui_btn)
 
-	# TUI mode button (secondary)
-	var tui_btn := _make_menu_button("终端模式 (TUI)", Color(0.3, 0.3, 0.35))
-	tui_btn.pressed.connect(func() -> void:
-		get_tree().change_scene_to_file("res://scenes/main/tui_game.tscn")
-	)
-	center.add_child(tui_btn)
+	# TUI mode button (secondary) — hidden for release, uncomment for dev testing
+	# var tui_btn := _make_menu_button("终端模式 (TUI)", Color(0.3, 0.3, 0.35))
+	# tui_btn.pressed.connect(func() -> void:
+	# 	get_tree().change_scene_to_file("res://scenes/main/tui_game.tscn")
+	# )
+	# center.add_child(tui_btn)
 
 	# Version
 	var version := Label.new()

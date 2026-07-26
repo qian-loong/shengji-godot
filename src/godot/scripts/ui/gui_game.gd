@@ -1651,7 +1651,14 @@ func _cards_without(source_cards: Array, removed_cards: Array) -> Array:
 
 func _show_played_cards(seat: int, cards: Array) -> void:
 	table_cards[seat] = cards
-	_render_cards_in_slot(seat, cards)
+
+	# AI 座位：瞬间显示（无动画）
+	if seat != human_seat:
+		_render_cards_in_slot(seat, cards)
+		return
+
+	# 玩家座位：飞行动画
+	_animate_player_cards_to_table(cards)
 
 
 func _render_table_cards(cards_by_seat: Dictionary) -> void:
@@ -1679,6 +1686,61 @@ func _render_cards_in_slot(seat: int, cards: Array) -> void:
 		cv.disabled = true
 		cv.position = Vector2(offset, 0)
 		slot.add_child(cv)
+		offset += PLAYED_CARD_STEP
+
+
+func _animate_player_cards_to_table(cards: Array) -> void:
+	var slot: Control = center_card_slots[human_seat]
+
+	# 清除旧卡牌
+	for child: Node in slot.get_children():
+		child.queue_free()
+
+	var offset := 0.0
+	for i: int in cards.size():
+		var card: Card = cards[i]
+
+		# 创建卡牌视图
+		var cv = _CardViewClass.new()
+		cv.custom_minimum_size = Vector2(PLAYED_CARD_W, PLAYED_CARD_H)
+		cv.size = Vector2(PLAYED_CARD_W, PLAYED_CARD_H)
+		cv.setup(card, true, _is_trump(card))
+		cv.disabled = true
+
+		# 获取这张牌在手牌区的全局位置
+		var start_pos_global: Vector2
+		var card_view_in_hand = hand_display.get_card_view_for_card(card)
+		if card_view_in_hand:
+			# 从实际卡牌位置飞出（中心点）
+			start_pos_global = card_view_in_hand.get_global_position() + card_view_in_hand.size * 0.5
+		else:
+			# 降级：从手牌区中心飞出
+			start_pos_global = hand_display.get_global_position() + hand_display.size * 0.5
+
+		# 转换为相对于 slot 的局部坐标
+		var end_pos := Vector2(offset, 0)
+		var start_pos := slot.get_global_transform().affine_inverse() * start_pos_global
+
+		cv.position = start_pos
+		cv.modulate.a = 0.7  # 初始半透明
+		cv.z_index = 10 + i  # 确保飞行中的牌在最上层
+		slot.add_child(cv)
+
+		# Tween 飞行动画
+		var delay := i * 0.12  # 序列出牌间隔 120ms
+		var tween := create_tween()
+		tween.set_ease(Tween.EASE_OUT)
+		tween.set_trans(Tween.TRANS_CUBIC)
+
+		# 淡入
+		tween.tween_property(cv, "modulate:a", 1.0, 0.2).set_delay(delay)
+
+		# 飞行
+		tween.parallel().tween_property(cv, "position", end_pos, 0.35).set_delay(delay)
+
+		# 恢复 z_index
+		tween.tween_property(cv, "z_index", 0, 0.0)
+
 		offset += PLAYED_CARD_STEP
 
 
