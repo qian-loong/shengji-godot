@@ -1,6 +1,6 @@
 # 系统索引 — 双升对局
 
-> 版本：v0.6 | 最后更新：2026-06-09
+> 版本：v0.7 | 最后更新：2026-07-26
 
 ---
 
@@ -8,10 +8,9 @@
 
 | 统计 | 数量 |
 |------|------|
-| 系统总数 | 23 |
-| 已完成设计 | 16 |
-| 已实现（代码） | 11 完整（C3 反主于 2026-05-18 补齐） |
-| TUI 替代（M1 表现层） | 5（P1–P5；图形 UI 待实现） |
+| 系统总数 | 24 |
+| 已完成设计 | 17 |
+| 已实现（代码） | 16 完整（Sprint 3 图形 UI 实现） |
 | 未开始（设计） | 7 |
 
 ---
@@ -31,11 +30,11 @@
 | 9 | C6 | 升级结算 | Core | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/upgrade-settlement.md` |
 | 10 | C7 | 对局状态机 | Core | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/game-state-machine.md` |
 | 11 | FT1 | AI 基础决策 | Feature | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/ai-basic.md` |
-| 12 | P2 | 手牌渲染 | Presentation | M1 | MVP | ✅ | ⏳ TUI 替代 | `design/gdd/hand-rendering.md` |
-| 13 | P1 | 桌面布局 UI | Presentation | M1 | MVP | ✅ | ⏳ TUI 替代 | `design/gdd/table-layout.md` |
-| 14 | P4 | 亮主/抢主 UI | Presentation | M1 | MVP | ✅ | ⏳ TUI 替代 | `design/gdd/bid-ui.md` |
-| 15 | P3 | 出牌/动画反馈 | Presentation | M1 | MVP | ✅ | ⏳ TUI 替代 | `design/gdd/play-animation.md` |
-| 16 | P5 | 结算界面 | Presentation | M1 | MVP | ✅ | ⏳ TUI 替代 | `design/gdd/settlement-ui.md` |
+| 12 | P2 | 手牌渲染 | Presentation | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/hand-rendering.md` |
+| 13 | P1 | 桌面布局 UI | Presentation | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/table-layout.md` |
+| 14 | P4 | 亮主/抢主 UI | Presentation | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/bid-ui.md` |
+| 15 | P3 | 出牌/动画反馈 | Presentation | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/play-animation.md` |
+| 16 | P5 | 结算界面 | Presentation | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/settlement-ui.md` |
 | 17 | FT5 | 规则预设模板 | Feature | M2 | Vertical Slice | ⬜ | ⬜ 未开始 | — |
 | 18 | P6 | 规则配置界面 | Presentation | M2 | Vertical Slice | ⬜ | ⬜ 未开始 | — |
 | 19 | PL1 | 配置持久化 | Polish | M2 | Vertical Slice | ⬜ | ⬜ 未开始 | — |
@@ -43,6 +42,7 @@
 | 21 | FT3 | AI 配合意图 | Feature | M3 | Alpha | ⬜ | ⬜ 未开始 | — |
 | 22 | FT4 | AI 难度梯度 | Feature | M3 | Alpha | ⬜ | ⬜ 未开始 | — |
 | 23 | PL2 | 联机预留接口 | Polish | M5 | Full Vision | ⬜ | ⬜ 未开始 | — |
+| 24 | PL3 | 音频系统 | Polish | M4 | Beta | ✅ | ⬜ 未开始 | `design/gdd/audio-system.md` |
 
 ---
 
@@ -73,6 +73,7 @@
 | P6 规则配置界面 | F3, FT5 |
 | PL1 配置持久化 | F3 |
 | PL2 联机预留接口 | C7 |
+| PL3 音频系统 | — |
 
 ---
 
