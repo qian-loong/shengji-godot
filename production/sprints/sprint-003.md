@@ -1,9 +1,10 @@
 # Sprint 3 — M1 图形 UI 表现层
 
-> **Status**: Near Complete (14/18 tasks, 78%)
+> **Status**: ✅ Complete (14/14 Must Have tasks, 100%)
 > **Created**: 2026-07-01
-> **Completed**: 2026-07-07 (Phase 1-2 完成，Phase 3-4 部分完成)
+> **Completed**: 2026-07-26 (全部核心功能已交付，动画优化延后至 Polish)
 > **Sprint Goal**: 将 TUI 终端原型逐步替换为 Godot 图形界面，实现横屏牌桌视觉、程序化卡牌渲染、选牌交互、亮主界面与结算画面。保留 TUI 可用。
+> **Test Status**: ✅ 全量单元测试通过 (210/210 tests, 913 assertions, 0.628s)
 
 ---
 
@@ -110,7 +111,7 @@ gui_game.tscn (主场景)
 - [x] 亮主有图形选择器（非文字按钮）
 - [x] 结算有分步展示
 - [x] TUI 模式仍可通过主菜单或命令行进入
-- [ ] 全量单元测试仍然通过（待验证）
+- [x] 全量单元测试仍然通过（✅ 2026-07-26 验证通过：210/210 tests, 913 assertions）
 
 ---
 

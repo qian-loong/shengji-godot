@@ -27,14 +27,26 @@
 
 # Testing Standards
 
+## Test Framework and Location
+
+- **Framework**: GUT (Godot Unit Test) 9.6.0
+- **Test Location**: `src/godot/tests/` — **所有测试文件必须放在此目录**
+- **Naming Convention**: `test_*.gd` — 测试文件必须以 `test_` 前缀命名
+- **Running Tests**: 
+  ```bash
+  cd src/godot
+  $GODOT_EXE --headless --path . -s addons/gut/gut_cmdln.gd -gdir=res://tests -gexit
+  ```
+- **Detailed Standards**: 参见 `.claude/docs/testing-standards.md` 获取完整测试规范
+
 ## Test Evidence by Story Type
 
 All stories must have appropriate test evidence before they can be marked Done:
 
 | Story Type | Required Evidence | Location | Gate Level |
 |---|---|---|---|
-| **Logic** (formulas, AI, state machines) | Automated unit test — must pass | `tests/unit/[system]/` | BLOCKING |
-| **Integration** (multi-system) | Integration test OR documented playtest | `tests/integration/[system]/` | BLOCKING |
+| **Logic** (formulas, AI, state machines) | Automated unit test — must pass | `src/godot/tests/` | BLOCKING |
+| **Integration** (multi-system) | Integration test OR documented playtest | `src/godot/tests/` | BLOCKING |
 | **Visual/Feel** (animation, VFX, feel) | Screenshot + lead sign-off | `production/qa/evidence/` | ADVISORY |
 | **UI** (menus, HUD, screens) | Manual walkthrough doc OR interaction test | `production/qa/evidence/` | ADVISORY |
 | **Config/Data** (balance tuning) | Smoke check pass | `production/qa/smoke-[date].md` | ADVISORY |
