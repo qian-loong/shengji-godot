@@ -689,17 +689,14 @@ func _finish_round() -> void:
 	var team_names: Array[String] = ["南北队", "东西队"]
 	var team_name: String = team_names[upgrading_team]
 
-	if settlement.upgrade_blocked:
-		_log("[color=orange]%s 提案升 %d 级 → %s，但必打级拦截，实际留在 %s[/color]" % [
-			team_name, settlement.proposal.upgrade_levels,
-			Card.rank_symbol(settlement.proposal.new_rank),
-			Card.rank_symbol(settlement.new_rank)])
-	elif settlement.upgrade_levels > 0:
+	if settlement.upgrade_levels > 0:
 		_log("%s 升 %d 级 → 新级: %s" % [team_name, settlement.upgrade_levels, Card.rank_symbol(settlement.new_rank)])
+		if settlement.dealer_dethroned:
+			_log("庄家下庄，庄权交予攻方")
 	elif settlement.dealer_dethroned:
-		_log("攻方下庄（不升级）")
+		_log("庄家下庄（攻方达门槛，本局不升级）")
 	else:
-		_log("庄家方守住")
+		_log("庄家守庄")
 
 	_auto_save_log()
 
@@ -777,13 +774,14 @@ func _save_log() -> void:
 			_log("  - %s" % a)
 
 
-## 把日志写到仓库 docs/game-logs/，不再写到 AppData/Roaming/Godot
+## 把日志写到仓库 logs/，不再写到 docs/game-logs 或 AppData
 ## 项目根 = res:// 上两级（src/godot 的父父目录）
 func _resolve_log_path(filename: String) -> String:
 	var project_root := ProjectSettings.globalize_path("res://").trim_suffix("/")
-	# project_root 通常是 .../src/godot；向上两级 → 仓库根
 	var repo_root := project_root.get_base_dir().get_base_dir()
-	return "%s/docs/game-logs/%s" % [repo_root, filename]
+	var log_dir := "%s/logs" % repo_root
+	DirAccess.make_dir_recursive_absolute(log_dir)
+	return "%s/%s" % [log_dir, filename]
 
 
 # ============================================================

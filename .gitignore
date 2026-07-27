@@ -28,6 +28,9 @@ marrow/
 docs/consistency-failures.md
 
 # === Game Replay Logs (large JSON, do not commit) ===
+logs/*
+!logs/.gitkeep
+# legacy path kept ignored in case old files remain
 docs/game-logs/*.json
 docs/game-logs/*.txt
 !docs/game-logs/.gitkeep

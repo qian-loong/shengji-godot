@@ -45,10 +45,14 @@ func _init() -> void:
 	# Save log
 	var log_path := log_path_override
 	if log_path == "":
-		log_path = "user://game_log_%s.json" % Time.get_datetime_string_from_system().replace(":", "-")
+		var project_root := ProjectSettings.globalize_path("res://").trim_suffix("/")
+		var repo_root := project_root.get_base_dir().get_base_dir()
+		var log_dir := "%s/logs" % repo_root
+		DirAccess.make_dir_recursive_absolute(log_dir)
+		log_path = "%s/game_log_%s.json" % [log_dir, Time.get_datetime_string_from_system().replace(":", "-")]
 	var err := logger.save_to_file(log_path, false)
 	if err == OK:
-		print("\n日志已保存: %s" % ProjectSettings.globalize_path(log_path))
+		print("\n日志已保存: %s" % log_path)
 	else:
 		printerr("日志保存失败: %s" % error_string(err))
 
