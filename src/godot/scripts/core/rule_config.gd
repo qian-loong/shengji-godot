@@ -11,6 +11,13 @@ extends RefCounted
 # Enums
 # ============================================================
 
+enum ConfigSource {
+	PRESET_CLASSIC,      ## 经典模式 - 传统玩法
+	PRESET_COMPETITIVE,  ## 竞技模式 - 高手对决
+	PRESET_QUICK,        ## 快速模式 - 休闲速战
+	CUSTOM               ## 自定义配置
+}
+
 enum TrumpMode {
 	BID,       # 亮主
 	GRAB,      # 抢主 (first game only)
@@ -23,6 +30,20 @@ enum ConfigState {
 	EDITING,
 	LOCKED,
 }
+
+
+# ============================================================
+# Preset Management
+# ============================================================
+
+## 配置来源（当前使用的模式）
+var source: ConfigSource = ConfigSource.CUSTOM
+
+## 基础预设（如果从预设修改而来，记录原始预设）
+var base_preset: ConfigSource = ConfigSource.CUSTOM
+
+## 被修改的字段列表（从预设修改后记录）
+var modified_fields: Array[String] = []
 
 
 # ============================================================
@@ -179,3 +200,255 @@ func create_snapshot() -> RuleConfig:
 	snap.no_skip_enabled = no_skip_enabled
 	snap.initial_dealer = initial_dealer
 	return snap
+
+
+## 创建可编辑副本（用于修改锁定的配置）
+func duplicate_editable() -> RuleConfig:
+	var dup := create_snapshot()
+	dup.source = source
+	dup.base_preset = base_preset
+	dup.modified_fields = modified_fields.duplicate()
+	dup._state = ConfigState.EDITING
+	return dup
+
+
+# ============================================================
+# Preset Factory Methods
+# ============================================================
+
+## 从预设模式创建配置
+static func from_preset(preset: ConfigSource) -> RuleConfig:
+	var config: RuleConfig
+	match preset:
+		ConfigSource.PRESET_CLASSIC:
+			config = _create_classic_preset()
+		ConfigSource.PRESET_COMPETITIVE:
+			config = _create_competitive_preset()
+		ConfigSource.PRESET_QUICK:
+			config = _create_quick_preset()
+		ConfigSource.CUSTOM:
+			config = RuleConfig.new()  # 返回默认配置供用户修改
+		_:
+			push_error("Unknown preset: %s" % preset)
+			config = RuleConfig.new()
+
+	# 设置来源和基础预设
+	config.source = preset
+	config.base_preset = preset
+	config.modified_fields.clear()
+	return config
+
+
+## 经典模式 - 传统升级玩法
+static func _create_classic_preset() -> RuleConfig:
+	var config := RuleConfig.new()
+	# 牌副数：2副（经典玩法）
+	config.deck_count = 2
+	# 起始等级：2
+	config.current_rank = 2
+	# 定主方式：亮主
+	config.trump_mode = TrumpMode.BID
+	config.bid_requires_joker = false
+	# 王牌规则：大小王始终是王牌
+	config.joker_always_trump = true
+	config.trump_joker_color_match = false
+	# 出牌规则：允许甩牌，严格跟牌
+	config.allow_dump = true
+	config.strict_follow_structure = true
+	# 拖拉机规则：四张相同算拖拉机，主牌可以参与
+	config.four_same_is_tractor = true
+	config.tractor_allow_rank_card = true
+	# 升级规则：标准升级表
+	# 格式：[最低分, 升级方(0=庄家/1=闲家), 升级级数]
+	# 庄家守住：0分→3级，1-39分→2级，40-79分→1级
+	# 闲家下庄：80-119分→不升级，120-159分→1级，160-199分→2级，200+分→3级
+	config.upgrade_threshold = 80
+	config.upgrade_step = 1
+	config.upgrade_table = [
+		[0, 0, 3],    # 庄家0分→升3级
+		[1, 0, 2],    # 庄家1-39分→升2级
+		[40, 0, 1],   # 庄家40-79分→升1级
+		[80, 1, 0],   # 闲家80-119分→换庄不升级
+		[120, 1, 1],  # 闲家120-159分→升1级
+		[160, 1, 2],  # 闲家160-199分→升2级
+		[200, 1, 3]   # 闲家200+分→升3级
+	]
+	config.no_skip_enabled = false
+	config.no_skip_ranks = []
+	# 发牌顺序：随机
+	config.initial_dealer = -1
+	return config
+
+
+## 竞技模式 - 高手对决（更严格的规则）
+static func _create_competitive_preset() -> RuleConfig:
+	var config := RuleConfig.new()
+	# 牌副数：2副（PRD 标准）
+	config.deck_count = 2
+	config.current_rank = 2
+	# 定主方式：亮主（PRD 标准）
+	config.trump_mode = TrumpMode.BID
+	config.bid_requires_joker = false  # PRD：级牌可单独定主
+	# 王牌规则：宽松定主规则
+	config.joker_always_trump = true
+	config.trump_joker_color_match = false  # PRD：降低定主门槛
+	# 出牌规则：允许甩牌，严格跟牌结构
+	config.allow_dump = true
+	config.strict_follow_structure = true
+	# 拖拉机规则：四张相同算拖拉机，主牌参与
+	config.four_same_is_tractor = true
+	config.tractor_allow_rank_card = true
+	# 升级规则：100分门槛，50分间隔，完整四档
+	# 庄家守住：0分→3级，1-49分→2级，50-99分→1级
+	# 闲家下庄：100-149分→换庄不升级，150-199分→升1级，200-249分→升2级，250+分→升3级
+	config.upgrade_threshold = 100
+	config.upgrade_step = 1
+	config.upgrade_table = [
+		[0, 0, 3],     # 庄家0分→升3级
+		[1, 0, 2],     # 庄家1-49分→升2级
+		[50, 0, 1],    # 庄家50-99分→升1级
+		[100, 1, 0],   # 闲家100-149分→换庄不升级
+		[150, 1, 1],   # 闲家150-199分→升1级
+		[200, 1, 2],   # 闲家200-249分→升2级
+		[250, 1, 3]    # 闲家250+分→升3级
+	]
+	config.no_skip_enabled = true
+	config.no_skip_ranks = [Card.Rank.FIVE, Card.Rank.TEN, Card.Rank.KING]  # PRD：5、10、K 不可跳过
+	config.initial_dealer = -1
+	return config
+
+
+## 快速模式 - 休闲速战（简化规则，快速游戏）
+static func _create_quick_preset() -> RuleConfig:
+	var config := RuleConfig.new()
+	# 牌副数：1副（最快速度）
+	config.deck_count = 1
+	config.current_rank = 2
+	# 定主方式：亮主（保持标准）
+	config.trump_mode = TrumpMode.BID
+	config.bid_requires_joker = false  # 级牌可定主
+	# 王牌规则：大小王始终是王牌（简化）
+	config.joker_always_trump = true
+	config.trump_joker_color_match = false
+	# 出牌规则：禁用甩牌（简化），不严格跟牌（加快节奏）
+	config.allow_dump = false  # PRD：禁用甩牌简化规则
+	config.strict_follow_structure = false  # PRD：宽松跟牌
+	config.strict_follow_structure = false
+	# 拖拉机规则：简化（四张不算拖拉机）
+	config.four_same_is_tractor = false
+	config.tractor_allow_rank_card = false
+	# 升级规则：低门槛快速升级
+	# 庄家守住：0分→3级，1-29分→2级，30-59分→1级
+	# 闲家下庄：60-89分→1级，90-119分→2级，120+分→3级
+	config.upgrade_threshold = 60
+	config.upgrade_step = 1
+	config.upgrade_table = [
+		[0, 0, 3],     # 庄家0分→升3级
+		[1, 0, 2],     # 庄家1-29分→升2级
+		[30, 0, 1],    # 庄家30-59分→升1级
+		[60, 1, 1],    # 闲家60-89分→升1级
+		[90, 1, 2],    # 闲家90-119分→升2级
+		[120, 1, 3]    # 闲家120+分→升3级
+	]
+	config.no_skip_enabled = false
+	config.no_skip_ranks = []
+	config.initial_dealer = -1
+	return config
+
+
+# ============================================================
+# Preset Modification & Tracking
+# ============================================================
+
+## 设置自定义字段值（会自动标记为 CUSTOM）
+func set_custom_value(field_name: String, value: Variant) -> void:
+	if not field_name in self:
+		push_error("Field '%s' does not exist in RuleConfig" % field_name)
+		return
+
+	# 设置字段值
+	set(field_name, value)
+
+	# 标记为自定义配置
+	if source != ConfigSource.CUSTOM:
+		source = ConfigSource.CUSTOM
+
+	# 记录修改的字段（避免重复）
+	if not modified_fields.has(field_name):
+		modified_fields.append(field_name)
+
+
+## 检查字段是否被修改过
+func is_field_modified(field_name: String) -> bool:
+	return modified_fields.has(field_name)
+
+
+## 切换到新预设（丢弃所有修改）
+func switch_preset(new_preset: ConfigSource) -> void:
+	if new_preset == ConfigSource.CUSTOM:
+		push_warning("Cannot switch to CUSTOM preset - use set_custom_value() instead")
+		return
+
+	# 加载新预设
+	var new_config := from_preset(new_preset)
+	_copy_from(new_config)
+
+
+## 恢复到基础预设（丢弃所有修改）
+func reset_to_base() -> void:
+	if base_preset == ConfigSource.CUSTOM:
+		push_warning("No base preset to reset to")
+		return
+
+	var base_config := from_preset(base_preset)
+	_copy_from(base_config)
+
+
+## 内部：从另一个配置复制所有字段
+func _copy_from(other: RuleConfig) -> void:
+	source = other.source
+	base_preset = other.base_preset
+	modified_fields = other.modified_fields.duplicate()
+
+	deck_count = other.deck_count
+	current_rank = other.current_rank
+	trump_mode = other.trump_mode
+	fixed_trump_suit = other.fixed_trump_suit
+	joker_always_trump = other.joker_always_trump
+	trump_joker_color_match = other.trump_joker_color_match
+	bid_requires_joker = other.bid_requires_joker
+	allow_dump = other.allow_dump
+	strict_follow_structure = other.strict_follow_structure
+	four_same_is_tractor = other.four_same_is_tractor
+	tractor_allow_rank_card = other.tractor_allow_rank_card
+	upgrade_threshold = other.upgrade_threshold
+	upgrade_step = other.upgrade_step
+	upgrade_table = other.upgrade_table.duplicate(true)
+	no_skip_enabled = other.no_skip_enabled
+	no_skip_ranks = other.no_skip_ranks.duplicate()
+	initial_dealer = other.initial_dealer
+
+
+## 获取配置描述（用于 UI 显示）
+func get_config_description() -> String:
+	match source:
+		ConfigSource.PRESET_CLASSIC:
+			return "经典模式"
+		ConfigSource.PRESET_COMPETITIVE:
+			return "竞技模式"
+		ConfigSource.PRESET_QUICK:
+			return "快速模式"
+		ConfigSource.CUSTOM:
+			var base_name := ""
+			match base_preset:
+				ConfigSource.PRESET_CLASSIC:
+					base_name = "经典模式"
+				ConfigSource.PRESET_COMPETITIVE:
+					base_name = "竞技模式"
+				ConfigSource.PRESET_QUICK:
+					base_name = "快速模式"
+				_:
+					base_name = "默认"
+			return "自定义配置（基于%s）" % base_name
+		_:
+			return "未知配置"

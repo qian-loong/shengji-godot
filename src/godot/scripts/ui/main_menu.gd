@@ -63,9 +63,16 @@ func _build_ui() -> void:
 	# GUI mode button (primary)
 	var gui_btn := _make_menu_button("开始对局", Color(0.15, 0.50, 0.25))
 	gui_btn.pressed.connect(func() -> void:
-		get_tree().change_scene_to_file("res://scenes/main/gui_game.tscn")
+		get_tree().change_scene_to_file("res://scenes/main/preset_selector.tscn")
 	)
 	center.add_child(gui_btn)
+
+	# Custom game button (secondary)
+	var custom_btn := _make_menu_button("自定义规则", Color(0.60, 0.25, 0.10))
+	custom_btn.pressed.connect(func() -> void:
+		get_tree().change_scene_to_file("res://scenes/main/room_config.tscn")
+	)
+	center.add_child(custom_btn)
 
 	# TUI mode button (secondary) — hidden for release, uncomment for dev testing
 	# var tui_btn := _make_menu_button("终端模式 (TUI)", Color(0.3, 0.3, 0.35))
