@@ -47,26 +47,53 @@ static func calculate(
 		result.bottom_bonus = 0
 		result.final_score = attack_score
 
-	# Look up upgrade table
-	var side: int = 0
-	var levels: int = 0
+	# Determine upgrading side and levels
+	# 1. Check if attack reaches any upgrade threshold (>=, find highest match)
+	var attack_side: int = -1
+	var attack_levels: int = 0
+	var matched_threshold: int = -1
 	for row: Array in rule_config.upgrade_table:
-		if result.final_score >= row[0]:
-			side = row[1]
-			levels = row[2]
+		if result.final_score >= row[0] and row[0] > matched_threshold:
+			attack_side = row[1]
+			attack_levels = row[2]
+			matched_threshold = row[0]
+
+	# 2. Determine final upgrading side
+	var side: int
+	var levels: int
+	if attack_side >= 0:
+		# Attack reached a threshold (even if levels=0, like dethrone)
+		side = attack_side
+		levels = attack_levels
+	else:
+		# Attack didn't reach minimum threshold - dealer defends
+		# Look up upgrade_table for dealer's upgrade levels (0→3, 1-39→2, 40-79→1)
+		# Find the highest dealer threshold <= final_score
+		var dealer_threshold: int = -1
+		var dealer_levels: int = 1  # default to 1 if no match
+		for row: Array in rule_config.upgrade_table:
+			if row[1] == 0 and result.final_score >= row[0] and row[0] > dealer_threshold:
+				dealer_threshold = row[0]
+				dealer_levels = row[2]
+		side = 0
+		levels = dealer_levels
+
+	# GDD: 实际升级数 = 表中级数 × upgrade_step（庄家/闲家同一乘数）
+	var step: int = maxi(1, rule_config.upgrade_step)
+	var effective_levels: int = levels * step if levels > 0 else 0
 
 	result.upgrading_side = side
-	result.upgrade_levels = levels
+	result.upgrade_levels = effective_levels
 	result.dealer_dethroned = (result.final_score >= rule_config.upgrade_threshold)
 
 	# New dealer: if dethroned, next seat (counter-clockwise) becomes dealer
 	if result.dealer_dethroned:
 		result.new_dealer = (dealer_seat + 1) % 4
 	else:
-		result.new_dealer = -1  # Dealer unchanged
+		result.new_dealer = dealer_seat  # Dealer unchanged (keep same seat)
 
-	# Calculate new rank (use upgrading side's own rank as base)
-	if levels > 0:
+	# Calculate new rank (only if someone upgrades)
+	if effective_levels > 0:
 		var base_rank: int
 		if side == 0:
 			base_rank = current_rank  # Dealer's team rank
@@ -74,19 +101,20 @@ static func calculate(
 			base_rank = attack_rank  # Attack team's own rank
 		else:
 			base_rank = current_rank  # Fallback: shared rank mode
-		result.new_rank = apply_upgrade(base_rank, levels, rule_config)
+		result.new_rank = apply_upgrade(base_rank, effective_levels, rule_config)
 	else:
 		result.new_rank = current_rank
 
-	# Game over check: if upgrading past A
-	var rank_for_game_over: int
-	if side == 0:
-		rank_for_game_over = current_rank
-	elif attack_rank >= 0:
-		rank_for_game_over = attack_rank
+	# Game over check: only if attempting to upgrade FROM ACE
+	if result.upgrade_levels > 0:
+		var base_rank: int
+		if result.upgrading_side == 0:
+			base_rank = current_rank
+		else:
+			base_rank = attack_rank if attack_rank >= 0 else current_rank
+		result.game_over = (base_rank == Card.Rank.ACE)
 	else:
-		rank_for_game_over = current_rank
-	result.game_over = (rank_for_game_over == Card.Rank.ACE and levels > 0)
+		result.game_over = false
 
 	return result
 
@@ -100,9 +128,10 @@ static func apply_upgrade(current_rank: int, levels: int, rule_config: RuleConfi
 			# Past ACE = game over, return ACE
 			return Card.Rank.ACE
 		rank = next
-		# Check no-skip constraint (only if we have more levels to go)
-		if rule_config.no_skip_enabled and i < levels - 1:
-			if rank in rule_config.no_skip_ranks:
+		# Check no-skip constraint: stop if hit no_skip_rank AND there are more levels to apply
+		# (if i+1 < levels, there are remaining upgrade steps)
+		if rule_config.no_skip_enabled:
+			if rank in rule_config.no_skip_ranks and (i + 1) < levels:
 				return rank  # Stop at non-skippable rank
 	return rank
 

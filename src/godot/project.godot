@@ -1,4 +1,4 @@
-﻿; Engine configuration file.
+; Engine configuration file.
 ; It's best edited using the editor UI and not directly,
 ; since the parameters that go here are not all obvious.
 ;
@@ -10,12 +10,12 @@ config_version=5
 
 [application]
 
-config/name="˫���Ծ�"
-config/description="�����͵���˫��������Ϸ"
+config/name="双升对局"
+config/description=""
 run/main_scene="res://scenes/main/main_menu.tscn"
+config/quit_on_go_back=false
 config/features=PackedStringArray("4.6")
 config/icon="res://icon.svg"
-config/quit_on_go_back=false
 
 [display]
 

@@ -212,6 +212,105 @@ func duplicate_editable() -> RuleConfig:
 	return dup
 
 
+## 完整序列化（含 upgrade_table / upgrade_step，供磁盘与测试）
+func to_dict() -> Dictionary:
+	var table: Array = []
+	for row: Array in upgrade_table:
+		table.append([int(row[0]), int(row[1]), int(row[2])])
+	return {
+		"source": int(source),
+		"base_preset": int(base_preset),
+		"modified_fields": modified_fields.duplicate(),
+		"deck_count": deck_count,
+		"current_rank": current_rank,
+		"trump_mode": int(trump_mode),
+		"fixed_trump_suit": fixed_trump_suit,
+		"joker_always_trump": joker_always_trump,
+		"trump_joker_color_match": trump_joker_color_match,
+		"bid_requires_joker": bid_requires_joker,
+		"allow_dump": allow_dump,
+		"strict_follow_structure": strict_follow_structure,
+		"four_same_is_tractor": four_same_is_tractor,
+		"tractor_allow_rank_card": tractor_allow_rank_card,
+		"upgrade_threshold": upgrade_threshold,
+		"upgrade_step": upgrade_step,
+		"upgrade_table": table,
+		"no_skip_enabled": no_skip_enabled,
+		"no_skip_ranks": no_skip_ranks.duplicate(),
+		"initial_dealer": initial_dealer,
+	}
+
+
+## 从字典恢复。优先以 base_preset 的预设表为底，再叠加存档字段（兼容旧 JSON 缺表）
+static func from_dict(data: Dictionary) -> RuleConfig:
+	if data.is_empty():
+		return null
+
+	var base_id: int = int(data.get("base_preset", ConfigSource.CUSTOM))
+	var config: RuleConfig
+	if base_id >= 0 and base_id <= int(ConfigSource.PRESET_QUICK):
+		config = from_preset(base_id as ConfigSource)
+	else:
+		config = RuleConfig.new()
+
+	if data.has("source"):
+		config.source = int(data["source"]) as ConfigSource
+	if data.has("base_preset"):
+		config.base_preset = int(data["base_preset"]) as ConfigSource
+	if data.has("deck_count"):
+		config.deck_count = int(data["deck_count"])
+	if data.has("current_rank"):
+		config.current_rank = int(data["current_rank"])
+	if data.has("trump_mode"):
+		config.trump_mode = int(data["trump_mode"]) as TrumpMode
+	if data.has("fixed_trump_suit"):
+		config.fixed_trump_suit = int(data["fixed_trump_suit"])
+	if data.has("joker_always_trump"):
+		config.joker_always_trump = bool(data["joker_always_trump"])
+	if data.has("trump_joker_color_match"):
+		config.trump_joker_color_match = bool(data["trump_joker_color_match"])
+	if data.has("bid_requires_joker"):
+		config.bid_requires_joker = bool(data["bid_requires_joker"])
+	if data.has("allow_dump"):
+		config.allow_dump = bool(data["allow_dump"])
+	if data.has("strict_follow_structure"):
+		config.strict_follow_structure = bool(data["strict_follow_structure"])
+	if data.has("four_same_is_tractor"):
+		config.four_same_is_tractor = bool(data["four_same_is_tractor"])
+	if data.has("tractor_allow_rank_card"):
+		config.tractor_allow_rank_card = bool(data["tractor_allow_rank_card"])
+	if data.has("upgrade_threshold"):
+		config.upgrade_threshold = int(data["upgrade_threshold"])
+	if data.has("upgrade_step"):
+		config.upgrade_step = int(data["upgrade_step"])
+	if data.has("no_skip_enabled"):
+		config.no_skip_enabled = bool(data["no_skip_enabled"])
+	if data.has("initial_dealer"):
+		config.initial_dealer = int(data["initial_dealer"])
+
+	if data.has("upgrade_table"):
+		var raw_table: Array = data["upgrade_table"]
+		var table: Array[Array] = []
+		for row in raw_table:
+			if row is Array and row.size() >= 3:
+				table.append([int(row[0]), int(row[1]), int(row[2])])
+		if not table.is_empty():
+			config.upgrade_table = table
+
+	if data.has("no_skip_ranks"):
+		var ranks: Array[int] = []
+		for r in data["no_skip_ranks"]:
+			ranks.append(int(r))
+		config.no_skip_ranks = ranks
+
+	config.modified_fields.clear()
+	if data.has("modified_fields"):
+		for field in data["modified_fields"]:
+			config.modified_fields.append(str(field))
+
+	return config
+
+
 # ============================================================
 # Preset Factory Methods
 # ============================================================
@@ -341,7 +440,8 @@ static func _create_quick_preset() -> RuleConfig:
 	# 庄家守住：0分→3级，1-29分→2级，30-59分→1级
 	# 闲家下庄：60-89分→1级，90-119分→2级，120+分→3级
 	config.upgrade_threshold = 60
-	config.upgrade_step = 1
+	# GDD 快速模式：每次升 2 级（表中级数 × upgrade_step）
+	config.upgrade_step = 2
 	config.upgrade_table = [
 		[0, 0, 3],     # 庄家0分→升3级
 		[1, 0, 2],     # 庄家1-29分→升2级

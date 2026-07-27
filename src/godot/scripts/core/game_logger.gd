@@ -58,6 +58,7 @@ func set_rule_config(rc: RuleConfig) -> void:
 		"four_same_is_tractor": rc.four_same_is_tractor,
 		"tractor_allow_rank_card": rc.tractor_allow_rank_card,
 		"upgrade_threshold": rc.upgrade_threshold,
+		"upgrade_step": rc.upgrade_step,
 		"no_skip_enabled": rc.no_skip_enabled,
 		"no_skip_ranks": rc.no_skip_ranks.duplicate(),
 	}
@@ -314,7 +315,6 @@ func log_settlement(effective: EffectiveSettlement) -> void:
 		"new_rank_symbol": Card.rank_symbol(effective.new_rank),
 		"new_dealer": effective.new_dealer,
 		"game_over": effective.game_over,
-		"upgrade_blocked": effective.upgrade_blocked,
 		# 裁决细节：提案 vs 实际
 		"proposed": {
 			"upgrade_levels": proposal.upgrade_levels,

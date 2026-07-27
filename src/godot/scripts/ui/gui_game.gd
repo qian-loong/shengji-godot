@@ -3,6 +3,9 @@
 ## Uses SessionController for all game logic (same as tui_game.gd).
 extends Control
 
+const DebugConfig = preload("res://scripts/core/debug_config.gd")
+const ConfigStore = preload("res://scripts/core/config_store.gd")
+
 const SEAT_NAMES: Array[String] = ["你(南)", "AI-东", "搭档(北)", "AI-西"]
 const TABLE_BG_COLOR := Color(0.05, 0.13, 0.09)
 const TABLE_FELT_COLOR := Color(0.11, 0.42, 0.22)
@@ -408,6 +411,11 @@ func _build_info_bar() -> HBoxContainer:
 	bottom_btn.pressed.connect(_show_bottom_preview)
 	bar.add_child(bottom_btn)
 
+	# 返回主菜单按钮
+	var menu_btn := _make_styled_button("返回菜单", Color(0.65, 0.25, 0.25))
+	menu_btn.pressed.connect(_on_return_to_menu)
+	bar.add_child(menu_btn)
+
 	return bar
 
 
@@ -688,13 +696,12 @@ func _start_new_game() -> void:
 	_hide_settlement_panel()
 	_clear_turn_highlights()
 
-	rule_config = RuleConfig.new()
-	rule_config.deck_count = 2
-	rule_config.current_rank = Card.Rank.TWO
-	rule_config.bid_requires_joker = true
-	rule_config.trump_joker_color_match = true
-	rule_config.allow_dump = false
-	rule_config.strict_follow_structure = true
+	# 开局只读内存 ConfigStore.current；冷启动无内存时再按 preset/磁盘恢复
+	var preferred_preset: int = int(ProjectSettings.get_setting("game/selected_preset", -1))
+	if preferred_preset < 0 or preferred_preset > 2:
+		preferred_preset = -1
+	rule_config = ConfigStore.take_for_match(preferred_preset)
+	ProjectSettings.set_setting("game/selected_preset", -1)
 
 	logger = GameLogger.new(true)
 	logger.set_rule_config(rule_config)
@@ -1558,6 +1565,7 @@ func _resolve_trick() -> void:
 
 func _finish_round() -> void:
 	_clear_turn_highlights()
+	DebugConfig.log_game("_finish_round called")
 	var finish := session_controller.finish_round()
 	if not finish.get("ok", false):
 		push_error("[gui_game] finish_round failed: %s" % finish.get("error", "unknown"))
@@ -1568,6 +1576,7 @@ func _finish_round() -> void:
 		push_error("[gui_game] settlement is null in finish payload: %s" % str(finish))
 		_log("[color=red]结算数据为空[/color]")
 		return
+	DebugConfig.log_game("Settlement received: game_over=%s, new_rank=%d" % [settlement.game_over, settlement.new_rank])
 	_sync_host_from_controller()
 
 	_clear_table_cards()
@@ -1588,27 +1597,28 @@ func _show_settlement(settlement: EffectiveSettlement, finish: Dictionary) -> vo
 	var team_names: Array[String] = ["南北队", "东西队"]
 	var team_name: String = team_names[upgrading_team]
 
-	if settlement.upgrade_blocked:
-		_log("[color=orange]%s 提案升 %d 级 → %s，但必打级拦截，实际留在 %s[/color]" % [
-			team_name, settlement.proposal.upgrade_levels,
-			Card.rank_symbol(settlement.proposal.new_rank),
-			Card.rank_symbol(settlement.new_rank)])
-	elif settlement.upgrade_levels > 0:
+	if settlement.upgrade_levels > 0:
 		_log("%s 升 %d 级 → 新级: %s" % [team_name, settlement.upgrade_levels, Card.rank_symbol(settlement.new_rank)])
+		if settlement.dealer_dethroned:
+			_log("庄家下庄，庄权交予攻方")
 	elif settlement.dealer_dethroned:
-		_log("攻方下庄（不升级）")
+		_log("庄家下庄（攻方达门槛，本局不升级）")
 	else:
-		_log("庄家方守住")
+		_log("庄家守庄")
 
 	var summary_text: String
-	if settlement.upgrade_blocked:
-		summary_text = "%s 升级被必打级拦截" % team_name
+	if settlement.upgrade_levels > 0 and settlement.dealer_dethroned:
+		# 攻方既下庄又升级（如 120+）
+		summary_text = "庄家下庄，%s 升 %d 级" % [team_name, settlement.upgrade_levels]
 	elif settlement.upgrade_levels > 0:
-		summary_text = "%s 升 %d 级" % [team_name, settlement.upgrade_levels]
+		# 庄家守住并升级
+		summary_text = "庄家守庄，%s 升 %d 级" % [team_name, settlement.upgrade_levels]
 	elif settlement.dealer_dethroned:
-		summary_text = "攻方下庄"
+		# 仅换庄、不升级
+		summary_text = "庄家下庄（不升级）"
 	else:
-		summary_text = "庄家方守住"
+		# 理论少见：无升级且未下庄（分数不足档等）
+		summary_text = "本局无升级"
 
 	_populate_settlement_panel(settlement, finish, summary_text, team_name)
 	_add_settlement_action_buttons(settlement.game_over)
@@ -1651,14 +1661,7 @@ func _cards_without(source_cards: Array, removed_cards: Array) -> Array:
 
 func _show_played_cards(seat: int, cards: Array) -> void:
 	table_cards[seat] = cards
-
-	# AI 座位：瞬间显示（无动画）
-	if seat != human_seat:
-		_render_cards_in_slot(seat, cards)
-		return
-
-	# 玩家座位：飞行动画
-	_animate_player_cards_to_table(cards)
+	_render_cards_in_slot(seat, cards)
 
 
 func _render_table_cards(cards_by_seat: Dictionary) -> void:
@@ -1686,61 +1689,6 @@ func _render_cards_in_slot(seat: int, cards: Array) -> void:
 		cv.disabled = true
 		cv.position = Vector2(offset, 0)
 		slot.add_child(cv)
-		offset += PLAYED_CARD_STEP
-
-
-func _animate_player_cards_to_table(cards: Array) -> void:
-	var slot: Control = center_card_slots[human_seat]
-
-	# 清除旧卡牌
-	for child: Node in slot.get_children():
-		child.queue_free()
-
-	var offset := 0.0
-	for i: int in cards.size():
-		var card: Card = cards[i]
-
-		# 创建卡牌视图
-		var cv = _CardViewClass.new()
-		cv.custom_minimum_size = Vector2(PLAYED_CARD_W, PLAYED_CARD_H)
-		cv.size = Vector2(PLAYED_CARD_W, PLAYED_CARD_H)
-		cv.setup(card, true, _is_trump(card))
-		cv.disabled = true
-
-		# 获取这张牌在手牌区的全局位置
-		var start_pos_global: Vector2
-		var card_view_in_hand = hand_display.get_card_view_for_card(card)
-		if card_view_in_hand:
-			# 从实际卡牌位置飞出（中心点）
-			start_pos_global = card_view_in_hand.get_global_position() + card_view_in_hand.size * 0.5
-		else:
-			# 降级：从手牌区中心飞出
-			start_pos_global = hand_display.get_global_position() + hand_display.size * 0.5
-
-		# 转换为相对于 slot 的局部坐标
-		var end_pos := Vector2(offset, 0)
-		var start_pos := slot.get_global_transform().affine_inverse() * start_pos_global
-
-		cv.position = start_pos
-		cv.modulate.a = 0.7  # 初始半透明
-		cv.z_index = 10 + i  # 确保飞行中的牌在最上层
-		slot.add_child(cv)
-
-		# Tween 飞行动画
-		var delay := i * 0.12  # 序列出牌间隔 120ms
-		var tween := create_tween()
-		tween.set_ease(Tween.EASE_OUT)
-		tween.set_trans(Tween.TRANS_CUBIC)
-
-		# 淡入
-		tween.tween_property(cv, "modulate:a", 1.0, 0.2).set_delay(delay)
-
-		# 飞行
-		tween.parallel().tween_property(cv, "position", end_pos, 0.35).set_delay(delay)
-
-		# 恢复 z_index
-		tween.tween_property(cv, "z_index", 0, 0.0)
-
 		offset += PLAYED_CARD_STEP
 
 
@@ -1958,7 +1906,7 @@ func _populate_settlement_panel(
 		_add_settlement_line("底牌: %d × %d 倍 = %d" % [
 			settlement.bottom_score, settlement.bottom_multiplier, settlement.bottom_bonus])
 	else:
-		_add_settlement_line("底牌不计分（庄方收墩）")
+		_add_settlement_line("底牌不计分（庄家方收最后一墩）")
 	_add_settlement_line("最终得分: %d" % settlement.final_score, true)
 	_add_settlement_line(summary_text, true)
 
@@ -1992,7 +1940,7 @@ func _debug_dump_settlement_panel() -> void:
 	var parent_name := "<none>"
 	if settlement_panel.get_parent():
 		parent_name = String(settlement_panel.get_parent().name)
-	print("[gui_game] settlement panel state: parent=%s visible=%s children=%d panel_rect=%s content_rect=%s viewport=%s" % [
+	DebugConfig.log_ui("settlement panel state: parent=%s visible=%s children=%d panel_rect=%s content_rect=%s viewport=%s" % [
 		parent_name,
 		str(settlement_panel.visible),
 		settlement_content.get_child_count(),
@@ -2441,7 +2389,9 @@ func _save_log() -> void:
 func _resolve_log_path(filename: String) -> String:
 	var project_root := ProjectSettings.globalize_path("res://").trim_suffix("/")
 	var repo_root := project_root.get_base_dir().get_base_dir()
-	return "%s/docs/game-logs/%s" % [repo_root, filename]
+	var log_dir := "%s/logs" % repo_root
+	DirAccess.make_dir_recursive_absolute(log_dir)
+	return "%s/%s" % [log_dir, filename]
 
 
 # ============================================================
@@ -2579,3 +2529,7 @@ func _card_identity_key(card: Card) -> String:
 	if card.is_joker:
 		return "joker_%d" % card.joker_type
 	return "%d_%02d" % [card.suit, card.rank]
+
+
+func _on_return_to_menu() -> void:
+	get_tree().change_scene_to_file("res://scenes/main/main_menu.tscn")

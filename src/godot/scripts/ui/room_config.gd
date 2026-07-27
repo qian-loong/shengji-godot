@@ -1,11 +1,14 @@
 ## Room Config — 房间配置界面
 ## S4-03: 允许房主调整规则细节（副牌数、升级分、甩牌等）
+## 确认后：内存 ConfigStore.current + 磁盘 user://custom_rule_config.json
+## 开局只读内存，不在进游戏时再读 JSON
 extends Control
 
 signal config_confirmed(config: RuleConfig)
 signal config_cancelled()
 
 const RuleConfig = preload("res://scripts/core/rule_config.gd")
+const ConfigStore = preload("res://scripts/core/config_store.gd")
 const Card = preload("res://scripts/core/card.gd")
 
 # 当前编辑的配置
@@ -28,6 +31,12 @@ var _preset_label: Label
 
 func _ready() -> void:
 	_build_ui()
+
+	# 从预设选择界面：内存同预设 → 磁盘同预设 → 预设默认
+	var preset_id: int = int(ProjectSettings.get_setting("game/selected_preset", -1))
+	if preset_id >= 0 and preset_id <= int(RuleConfig.ConfigSource.PRESET_QUICK):
+		load_config(ConfigStore.resolve_for_edit(preset_id as RuleConfig.ConfigSource))
+	ProjectSettings.set_setting("game/selected_preset", -1)
 
 
 ## 加载配置（从预设或自定义）
@@ -342,9 +351,12 @@ func _on_confirm_pressed() -> void:
 		# TODO: 显示错误提示对话框
 		return
 
-	# 保存配置并跳转到游戏场景
-	ProjectSettings.set_setting("game/selected_preset", int(_config.source))
-	ProjectSettings.set_setting("game/custom_config", _config)
+	# 内存 + 磁盘；开局只读 ConfigStore.current
+	if not ConfigStore.commit_custom(_config):
+		push_error("保存自定义配置失败")
+		# TODO: 显示错误提示对话框
+		return
+
 	get_tree().change_scene_to_file("res://scenes/main/gui_game.tscn")
 
 
@@ -354,11 +366,8 @@ func _on_cancel_pressed() -> void:
 
 
 func _on_reset_pressed() -> void:
-	if _config and _config.source != RuleConfig.ConfigSource.CUSTOM:
-		# 恢复到原始预设
-		_config = RuleConfig.from_preset(_config.source)
-		_update_ui_from_config()
-	else:
-		# 恢复到经典模式
-		_config = RuleConfig.from_preset(RuleConfig.ConfigSource.PRESET_CLASSIC)
-		_update_ui_from_config()
+	var base := _config.base_preset if _config else RuleConfig.ConfigSource.PRESET_CLASSIC
+	if base == RuleConfig.ConfigSource.CUSTOM:
+		base = RuleConfig.ConfigSource.PRESET_CLASSIC
+	_config = RuleConfig.from_preset(base)
+	_update_ui_from_config()
