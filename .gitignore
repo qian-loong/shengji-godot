@@ -1,3 +1,13 @@
+# === Local one-off Godot probe scripts (not GUT tests) ===
+# Created ad-hoc as `godot --headless --script ...` while debugging settlement.
+# Real tests live under src/godot/tests/.
+src/godot/test_*.gd
+src/godot/test_*.gd.uid
+src/godot/debug_*.gd
+src/godot/debug_*.gd.uid
+src/godot/verify_*.gd
+src/godot/verify_*.gd.uid
+
 # === IDE and Editor ===
 .vs/
 .vscode/settings.json
