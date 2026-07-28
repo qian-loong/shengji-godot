@@ -1,0 +1,40 @@
+{
+  "name": "single_factor_quick_v1",
+  "description": "快速预设为基底的单因子扫描：每次只改一个字段，对照 baseline。",
+  "base_preset": "quick",
+  "games_per_case": 3,
+  "max_rounds": 30,
+  "seed_base": 42,
+  "factors": [
+    {
+      "id": "baseline",
+      "description": "快速预设原样（对照）",
+      "overrides": {}
+    },
+    {
+      "id": "allow_dump_on",
+      "description": "开启甩牌",
+      "overrides": { "allow_dump": true }
+    },
+    {
+      "id": "upgrade_step_1",
+      "description": "升级步数改为 1（对照快速默认 2）",
+      "overrides": { "upgrade_step": 1 }
+    },
+    {
+      "id": "strict_follow_on",
+      "description": "开启严格跟牌结构",
+      "overrides": { "strict_follow_structure": true }
+    },
+    {
+      "id": "no_skip_on",
+      "description": "启用必打等级",
+      "overrides": { "no_skip_enabled": true, "no_skip_ranks": [5, 10, 13] }
+    },
+    {
+      "id": "threshold_80",
+      "description": "升级门槛 80（接近经典）",
+      "overrides": { "upgrade_threshold": 80 }
+    }
+  ]
+}

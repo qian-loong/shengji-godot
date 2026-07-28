@@ -16,6 +16,9 @@ var round_num: int = 0
 var game_seed: int = -1  # -1 = random
 var max_rounds: int = -1  # -1 = run until game over
 var log_path_override: String = ""
+var case_id: String = ""
+var _cli_preset: String = ""
+var _cli_config_path: String = ""
 
 const SEAT_NAMES: Array[String] = ["你(南)", "AI-东", "搭档(北)", "AI-西"]
 const TEAM_NAMES: Array[String] = ["南北队", "东西队"]
@@ -23,33 +26,18 @@ const TEAM_NAMES: Array[String] = ["南北队", "东西队"]
 
 func _init() -> void:
 	_print_header()
-	rule_config = _create_default_config()
+	_parse_cli_args()
+	rule_config = _resolve_rule_config()
+	_print_config_summary()
 	logger = GameLogger.new(true)  # debug enabled
 	logger.set_rule_config(rule_config)
 	session_controller = SessionController.new()
 	session_controller.start_new_session(rule_config, logger, human_seat)
 
-	# Parse command line for seed
-	for arg: String in OS.get_cmdline_args():
-		if arg.begins_with("--seed="):
-			game_seed = arg.split("=")[1].to_int()
-			print("使用固定基础种子: %d" % game_seed)
-		elif arg.begins_with("--max-rounds="):
-			max_rounds = arg.split("=")[1].to_int()
-			print("最多验证局数: %d" % max_rounds)
-		elif arg.begins_with("--log-path="):
-			log_path_override = arg.split("=")[1]
-
 	_run_game_loop()
 
 	# Save log
-	var log_path := log_path_override
-	if log_path == "":
-		var project_root := ProjectSettings.globalize_path("res://").trim_suffix("/")
-		var repo_root := project_root.get_base_dir().get_base_dir()
-		var log_dir := "%s/logs" % repo_root
-		DirAccess.make_dir_recursive_absolute(log_dir)
-		log_path = "%s/game_log_%s.json" % [log_dir, Time.get_datetime_string_from_system().replace(":", "-")]
+	var log_path := _resolve_output_log_path()
 	var err := logger.save_to_file(log_path, false)
 	if err == OK:
 		print("\n日志已保存: %s" % log_path)
@@ -74,17 +62,134 @@ func _print_header() -> void:
 	print("║       双升对局 — 终端可玩原型         ║")
 	print("╚══════════════════════════════════════╝")
 	print("")
+	print("CLI: --preset=classic|competitive|quick  --config=<RuleConfig.json>")
+	print("     --seed=N  --max-rounds=N  --log-path=<path>  --case-id=<id>")
+	print("")
 
 
-func _create_default_config() -> RuleConfig:
-	var rc := RuleConfig.new()
-	rc.deck_count = 2
-	rc.current_rank = Card.Rank.TWO
-	rc.bid_requires_joker = true
-	rc.trump_joker_color_match = true
-	rc.allow_dump = false  # MVP: no dump to simplify
-	rc.strict_follow_structure = true
-	return rc
+func _parse_cli_args() -> void:
+	for arg: String in OS.get_cmdline_user_args():
+		_apply_cli_arg(arg)
+	for arg: String in OS.get_cmdline_args():
+		_apply_cli_arg(arg)
+
+
+func _apply_cli_arg(arg: String) -> void:
+	if arg.begins_with("--seed="):
+		game_seed = arg.split("=")[1].to_int()
+		print("使用固定基础种子: %d" % game_seed)
+	elif arg.begins_with("--max-rounds="):
+		max_rounds = arg.split("=")[1].to_int()
+		print("最多验证局数: %d" % max_rounds)
+	elif arg.begins_with("--log-path="):
+		log_path_override = arg.split("=")[1]
+	elif arg.begins_with("--preset="):
+		_cli_preset = arg.split("=")[1].strip_edges().to_lower()
+	elif arg.begins_with("--config="):
+		_cli_config_path = arg.split("=")[1].strip_edges()
+	elif arg.begins_with("--case-id="):
+		case_id = arg.split("=")[1].strip_edges()
+
+
+## Resolve config: --config JSON > --preset > classic preset
+func _resolve_rule_config() -> RuleConfig:
+	if not _cli_config_path.is_empty():
+		var loaded := _load_config_from_path(_cli_config_path)
+		if loaded != null:
+			print("配置来源: --config=%s" % _cli_config_path)
+			return loaded
+		printerr("无法加载 --config，回退预设/默认")
+
+	if not _cli_preset.is_empty():
+		var preset := _parse_preset_name(_cli_preset)
+		if preset >= 0:
+			print("配置来源: --preset=%s" % _cli_preset)
+			return RuleConfig.from_preset(preset as RuleConfig.ConfigSource)
+		printerr("未知 --preset=%s，回退经典" % _cli_preset)
+
+	print("配置来源: 默认经典预设")
+	return RuleConfig.from_preset(RuleConfig.ConfigSource.PRESET_CLASSIC)
+
+
+func _parse_preset_name(name: String) -> int:
+	match name:
+		"classic", "0", "preset_classic":
+			return int(RuleConfig.ConfigSource.PRESET_CLASSIC)
+		"competitive", "comp", "1", "preset_competitive":
+			return int(RuleConfig.ConfigSource.PRESET_COMPETITIVE)
+		"quick", "2", "preset_quick":
+			return int(RuleConfig.ConfigSource.PRESET_QUICK)
+		_:
+			return -1
+
+
+func _load_config_from_path(path: String) -> RuleConfig:
+	var abs_path := path
+	if path.begins_with("res://") or path.begins_with("user://"):
+		abs_path = ProjectSettings.globalize_path(path)
+	if not FileAccess.file_exists(abs_path):
+		# Also try relative to repo root (parent of src/godot)
+		var project_root := ProjectSettings.globalize_path("res://").trim_suffix("/")
+		var repo_root := project_root.get_base_dir().get_base_dir()
+		var alt := "%s/%s" % [repo_root, path]
+		if FileAccess.file_exists(alt):
+			abs_path = alt
+		else:
+			printerr("配置文件不存在: %s" % path)
+			return null
+
+	var file := FileAccess.open(abs_path, FileAccess.READ)
+	if file == null:
+		printerr("无法打开配置文件: %s" % abs_path)
+		return null
+	var text := file.get_as_text()
+	file.close()
+
+	var json := JSON.new()
+	if json.parse(text) != OK:
+		printerr("配置 JSON 解析失败: %s" % json.get_error_message())
+		return null
+	if typeof(json.data) != TYPE_DICTIONARY:
+		printerr("配置 JSON 根节点必须是对象")
+		return null
+	return RuleConfig.from_dict(json.data as Dictionary)
+
+
+func _print_config_summary() -> void:
+	if rule_config == null:
+		return
+	print("RuleConfig: deck=%d threshold=%d step=%d dump=%s strict=%s no_skip=%s source=%d base=%d" % [
+		rule_config.deck_count,
+		rule_config.upgrade_threshold,
+		rule_config.upgrade_step,
+		str(rule_config.allow_dump),
+		str(rule_config.strict_follow_structure),
+		str(rule_config.no_skip_enabled),
+		int(rule_config.source),
+		int(rule_config.base_preset),
+	])
+	if not case_id.is_empty():
+		print("case_id: %s" % case_id)
+
+
+func _repo_root() -> String:
+	var project_root := ProjectSettings.globalize_path("res://").trim_suffix("/")
+	return project_root.get_base_dir().get_base_dir()
+
+
+func _resolve_output_log_path() -> String:
+	if not log_path_override.is_empty():
+		var parent := log_path_override.get_base_dir()
+		if not parent.is_empty():
+			DirAccess.make_dir_recursive_absolute(parent)
+		return log_path_override
+
+	var log_dir := "%s/logs" % _repo_root()
+	DirAccess.make_dir_recursive_absolute(log_dir)
+	var stamp := Time.get_datetime_string_from_system().replace(":", "-")
+	if not case_id.is_empty():
+		return "%s/game_log_%s_%s.json" % [log_dir, case_id, stamp]
+	return "%s/game_log_%s.json" % [log_dir, stamp]
 
 
 # ============================================================

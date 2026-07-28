@@ -1,3 +1,8 @@
+# === Batch integration configs/logs (generated) ===
+configs/batch/**
+!configs/batch/.gitkeep
+# logs/batch already covered by logs/*
+
 # === Local one-off Godot probe scripts (not GUT tests) ===
 # Created ad-hoc as `godot --headless --script ...` while debugging settlement.
 # Real tests live under src/godot/tests/.
