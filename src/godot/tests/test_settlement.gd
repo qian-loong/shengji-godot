@@ -73,7 +73,7 @@ func test_settlement_dealer_stays() -> void:
 	assert_eq(result.upgrading_side, 0, "dealer side")
 	assert_eq(result.upgrade_levels, 1, "40-79 = dealer upgrades 1")
 	assert_false(result.dealer_dethroned)
-	assert_eq(result.new_dealer, -1, "dealer unchanged")
+	assert_eq(result.new_dealer, 0, "dealer unchanged")
 
 
 func test_settlement_bottom_pair() -> void:

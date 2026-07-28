@@ -588,7 +588,6 @@ func finish_round() -> Dictionary:
 	var attack_rank := state.team_ranks[SessionState.get_attack_team(actual_dealer)]
 	var proposal := game_round.calculate_settlement(attack_rank)
 
-	state.record_dealer_round(actual_dealer, state.current_rank)
 	var effective := state.apply_settlement(proposal, actual_dealer, rule_config)
 	last_settlement = effective
 	current_phase = "game_over" if state.game_over else "round_end"
@@ -602,7 +601,6 @@ func finish_round() -> Dictionary:
 		"settlement": effective,
 		"upgrading_team": effective.upgrading_team,
 		"game_over": effective.game_over,
-		"upgrade_blocked": effective.upgrade_blocked,
 		"current_dealer": state.current_dealer,
 		"current_rank": state.current_rank,
 		"team_ranks": state.team_ranks.duplicate(),

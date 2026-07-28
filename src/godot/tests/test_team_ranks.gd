@@ -11,6 +11,15 @@ var rc: RuleConfig
 func before_each() -> void:
 	rc = RuleConfig.new()
 	rc.deck_count = 2
+	var table: Array[Array] = []
+	table.append([0, 0, 3])
+	table.append([1, 0, 2])
+	table.append([40, 0, 1])
+	table.append([80, 1, 0])
+	table.append([120, 1, 1])
+	table.append([160, 1, 2])
+	table.append([200, 1, 3])
+	rc.upgrade_table = table
 
 
 ## Helper: simulate settlement and apply to team_ranks
@@ -56,15 +65,15 @@ func test_attack_team_upgrades_when_attack_wins() -> void:
 
 
 func test_dethrone_no_upgrade_both_unchanged() -> void:
-	# Dealer=seat2 (team0), attack score=100 → dethrone, no upgrade
+	# Dealer=seat2 (team0), attack score=100 → dethrone, no upgrade (0 levels)
 	var pattern := CardPattern.PatternResult.new(Card.CardType.SINGLE, 1)
-	var result := UpgradeSettlement.calculate(100, [], 2, true, pattern, R.SEVEN, rc)
+	var result := UpgradeSettlement.calculate(100, [], 2, true, pattern, R.SEVEN, rc, R.FOUR)
 	var ranks: Array[int] = [R.SEVEN, R.FOUR]
 	ranks = apply_settlement(ranks, 2, result)
-	assert_eq(ranks[0], R.SEVEN, "team0 unchanged")
-	assert_eq(ranks[1], R.FOUR, "team1 unchanged")
+	assert_eq(ranks[0], R.SEVEN, "team0 (defending) unchanged")
+	assert_eq(ranks[1], R.FOUR, "team1 (attacking) unchanged - dethrone but 0 levels")
 	assert_true(result.dealer_dethroned)
-	assert_eq(result.upgrade_levels, 0)
+	assert_eq(result.upgrade_levels, 0, "100 pts = dethrone, 0 level upgrade")
 
 
 # ============================================================

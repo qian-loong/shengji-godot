@@ -82,61 +82,45 @@ func test_finish_round_uses_attack_team_own_rank() -> void:
 	assert_eq(effective.new_rank, R.SEVEN, "effective.new_rank matches team_ranks[0]")
 	assert_eq(effective.upgrading_team, 0)
 	assert_false(effective.game_over)
-	assert_false(effective.upgrade_blocked)
 	assert_eq(effective.new_dealer, 2, "dethrone → new_dealer == next seat")
 
 
-## P0/P1/P2 综合回归：必打级拦截场景下，finish_round 返回的 settlement 与
-## 日志里的 settlement 必须都反映真实状态（10，不是提案里的 J），而不是提案。
-func test_finish_round_reflects_no_skip_block_in_settlement_and_log() -> void:
+## P0/P1/P2 综合回归：攻方不受必打级约束，正常升级。
+func test_finish_round_attack_upgrade_no_constraint() -> void:
 	# 南北队 at 10 从未打过 10 庄；东家 dealer 打 3 级，攻方 130 分 → 提案升 1 到 J。
-	# 会话层必打级拦回：team_ranks[0] 应留在 10。
+	# 攻方不受必打级约束，正常升级到 J。
 	controller.state.team_ranks = [R.TEN, R.THREE]
 	controller.state.current_dealer = 1
-	controller.state.record_dealer_round(0, R.TWO)
-	controller.state.record_dealer_round(0, R.THREE)
-	controller.state.record_dealer_round(0, R.FIVE)
-	controller.state.record_dealer_round(0, R.EIGHT)
 	controller.start_round(88888)
 	_force_round_ready_for_settlement(controller.game_round, 1, true, 130)
 
 	var result := controller.finish_round()
 
 	assert_true(result["ok"])
-	assert_true(result["upgrade_blocked"])
 	# P0：finish["settlement"].new_rank 必须与 state.team_ranks 一致。
 	var effective: EffectiveSettlement = result["settlement"]
-	assert_eq(effective.new_rank, R.TEN, "P0: settlement reflects blocked rank")
-	assert_eq(effective.upgrade_levels, 0, "P0: blocked → effective upgrade_levels == 0")
-	assert_true(effective.upgrade_blocked)
-	# 提案值可查证"本来会升到 J"。
+	assert_eq(effective.new_rank, R.JACK, "P0: settlement reflects attack upgrade")
+	assert_eq(effective.upgrade_levels, 1, "P0: attack upgrade 1 level")
+	# 提案值与 effective 一致。
 	assert_eq(effective.proposal.new_rank, R.JACK)
 	assert_eq(effective.proposal.upgrade_levels, 1)
 	# state 与 effective 严格一致。
-	assert_eq(controller.state.team_ranks[0], R.TEN)
-	assert_eq(controller.state.team_ranks, [R.TEN, R.THREE] as Array[int])
-	# P2：日志里也是拦截后的真实值，同时保留提案供复盘。
+	assert_eq(controller.state.team_ranks[0], R.JACK)
+	assert_eq(controller.state.team_ranks, [R.JACK, R.THREE] as Array[int])
+	# P2：日志里也是升级后的真实值。
 	var round_log: Dictionary = logger.get_log()["rounds"][0]
 	var settlement_log: Dictionary = round_log["settlement"]
-	assert_eq(settlement_log["new_rank"], R.TEN, "P2: log records effective new_rank")
-	assert_true(settlement_log["upgrade_blocked"])
-	assert_eq(settlement_log["effective"]["new_rank"], R.TEN)
+	assert_eq(settlement_log["new_rank"], R.JACK, "P2: log records effective new_rank")
+	assert_eq(settlement_log["effective"]["new_rank"], R.JACK)
 	assert_eq(settlement_log["proposed"]["new_rank"], R.JACK,
 		"log preserves proposal for replay")
 
 
-## P1 契约测试：EffectiveSettlement 保证"upgrade_blocked ⇒ game_over 归零"。
+## P1 契约测试：EffectiveSettlement 保证 game_over 正确性。
 ##
-## 关于场景选择：目前默认 no_skip_ranks = [5,10,K]，不含 A；而得分层
-## proposal.game_over=true 要求 rank_for_game_over==A（"从 A 起升才结束"）。
-## 因此在**当前**默认规则下，"proposal.game_over=true 且 upgrade_blocked=true"
-## 天然不会共存，无法构造真实对局场景。
-##
-## 但一旦规则扩展（例如把 A 加入 no_skip_ranks，或未来引入其它拦截路径）
-## 分歧就会实兑。EffectiveSettlement.from_proposal 是唯一的合并点，
-## 契约测试保证它无论 proposal 说什么，只要 upgrade_blocked=true 就把
-## game_over/upgrade_levels 归零。这样 P1 的隐患被封死在类型层。
-func test_effective_settlement_forces_game_over_false_when_blocked() -> void:
+## 攻方升级不再受必打级约束，因此不存在 upgrade_blocked 字段。
+## 此测试保持简化：验证 game_over 从 proposal 正确透传到 effective。
+func test_effective_settlement_game_over_passthrough() -> void:
 	# 手工构造一个 proposal，假装其自身就想 game_over。
 	var proposal := UpgradeSettlement.SettlementResult.new()
 	proposal.attack_base_score = 120
@@ -148,30 +132,13 @@ func test_effective_settlement_forces_game_over_false_when_blocked() -> void:
 	proposal.dealer_dethroned = true
 	proposal.game_over = true  # 提案自称游戏结束
 
-	# upgrade_blocked=true 时：无论 proposal.game_over 是什么，
-	# effective 一律归零，且 upgrade_levels 也归零。
-	var blocked := EffectiveSettlement.from_proposal(
-		proposal,
-		0,           # upgrading_team
-		R.KING,      # effective_new_rank（拦回起点）
-		false,       # effective_game_over（由 SessionState 依据 upgrade_blocked 计算）
-		0,           # effective_new_dealer（此处不关注）
-		true,        # upgrade_blocked
-	)
-	assert_false(blocked.game_over, "P1: blocked → effective.game_over must be false")
-	assert_eq(blocked.upgrade_levels, 0, "P0: blocked → effective.upgrade_levels == 0")
-	assert_eq(blocked.new_rank, R.KING)
-	# 但 proposal 一定被保留原样，日志复盘时能看到"本来会怎样"。
-	assert_true(blocked.proposal.game_over)
-	assert_eq(blocked.proposal.new_rank, R.ACE)
-	assert_eq(blocked.proposal.upgrade_levels, 1)
-
-	# 反向：upgrade_blocked=false 时 game_over 完全透传 proposal。
+	# game_over 完全透传 proposal。
 	var passthrough := EffectiveSettlement.from_proposal(
-		proposal, 0, R.ACE, true, 2, false
+		proposal, 0, R.ACE, true, 2
 	)
-	assert_true(passthrough.game_over, "not blocked → game_over follows caller")
+	assert_true(passthrough.game_over, "game_over follows proposal")
 	assert_eq(passthrough.upgrade_levels, 1)
+	assert_eq(passthrough.new_rank, R.ACE)
 
 
 ## P1 集成：finish_round 的返回 dict 与 log 里的 game_over/upgrade_levels
