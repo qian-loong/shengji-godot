@@ -1,0 +1,14 @@
+{
+  "description": "甩牌最大性缺口：S0 甩 ♥Q♥Q♥J，但 S1 手握 ♥K♥K + ♥A。按 GDD §2.3 应甩牌失败，只能出最小单张",
+  "deck_count": 2,
+  "dealer": 0,
+  "trump_suit": 0,
+  "rank": 2,
+  "seed": 11,
+  "lead_strategy": "dump",
+  "require": {
+    "0": ["♥Q", "♥Q", "♥J", "♥10", "♥9"],
+    "1": ["♥K", "♥K", "♥A", "♥A"]
+  },
+  "bottom_require": ["♠K", "♠K"]
+}

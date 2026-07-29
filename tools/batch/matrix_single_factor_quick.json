@@ -33,8 +33,16 @@
     },
     {
       "id": "threshold_80",
-      "description": "升级门槛 80（接近经典）",
-      "overrides": { "upgrade_threshold": 80 }
+      "description": "升级门槛 80（接近经典）—— 门槛与升级表同改；1 副牌 total_score=100，够不到的档位已截掉",
+      "overrides": {
+        "upgrade_threshold": 80,
+        "upgrade_table": [
+          [0, 0, 3],
+          [1, 0, 2],
+          [40, 0, 1],
+          [80, 1, 0]
+        ]
+      }
     }
   ]
 }

@@ -1,0 +1,12 @@
+{
+  "description": "四张级牌拖拉机：级=5 时 ♠5♠5♥5♥5 全在主牌域，是 four_same_is_tractor 唯一真正生效的场景",
+  "deck_count": 2,
+  "dealer": 0,
+  "trump_suit": 0,
+  "rank": 5,
+  "seed": 42,
+  "require": {
+    "0": ["♠5", "♠5", "♥5", "♥5", "♦5", "♣5", "RedJoker", "RedJoker", "BlackJoker", "BlackJoker"]
+  },
+  "bottom_require": ["♠K", "♠K", "♥K", "♥K"]
+}

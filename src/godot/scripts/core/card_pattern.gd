@@ -81,12 +81,26 @@ static func _is_pair(a: Card, b: Card) -> bool:
 
 ## Try to identify cards as a tractor (≥2 consecutive pairs)
 static func _try_tractor(cards: Array, current_rank: int, tractor_allow_rank_card: bool, four_same_is_tractor: bool) -> PatternResult:
-	# Special case: four_same_is_tractor with exactly 4 identical cards
-	if four_same_is_tractor and cards.size() == 4 and _all_same(cards):
+	# 四张王（大王对 + 小王对）视为拖拉机，扣底 ×4。
+	#
+	# 大小王在主牌域排序上紧邻（小王 140 / 大王 150），是主牌域最强的两个对子，
+	# 按常见双升玩法视为连对。恒定生效，不受 four_same_is_tractor 控制——
+	# 后者管的是级牌，两者是不同的规则。
+	if cards.size() == 4 and _is_four_jokers(cards):
 		var r := PatternResult.new(Card.CardType.TRACTOR, 4)
 		r.pair_count = 2
-		if not cards[0].is_joker:
-			r.pairs = [cards[0].rank, cards[0].rank]
+		return r
+
+	# four_same_is_tractor：四张同点数，如 ♠5♠5♥5♥5（两个同点数的对子）。
+	#
+	# 注意不是"四张完全相同的牌"：2 副牌下同一张牌最多 2 份，
+	# ♠5♠5♠5♠5 需要 4 副牌，而 RuleConfig.validate() 限制 deck_count ∈ {1,2}。
+	# 该规则实际只对**四张级牌**生效——非级牌的同点数 4 张必然跨花色域
+	# （♠5 主 / ♥5 副），首出会被 PlayValidator._same_domain 拒绝。
+	if four_same_is_tractor and cards.size() == 4 and _is_four_same_rank(cards):
+		var r := PatternResult.new(Card.CardType.TRACTOR, 4)
+		r.pair_count = 2
+		r.pairs = [cards[0].rank, cards[0].rank]
 		return r
 
 	if cards.size() < 4 or cards.size() % 2 != 0:
@@ -129,23 +143,68 @@ static func _all_same(cards: Array) -> bool:
 	return true
 
 
+## 牌的等价键 —— 与 Card.equals 一致（忽略 deck_id）。
+static func _identity_key(card: Card) -> String:
+	if card.is_joker:
+		return "joker_%d" % card.joker_type
+	return "%d_%d" % [card.suit, card.rank]
+
+
+## 四张王：大王 2 张 + 小王 2 张（1 副牌下凑不出，自然不触发）。
+static func _is_four_jokers(cards: Array) -> bool:
+	if cards.size() != 4:
+		return false
+	var small := 0
+	var big := 0
+	for c: Card in cards:
+		if not c.is_joker:
+			return false
+		if c.joker_type == Card.JokerType.SMALL:
+			small += 1
+		else:
+			big += 1
+	return small == 2 and big == 2
+
+
+## 四张同点数：4 张 rank 相同，且能配成两个对子。
+## ♠5♠5♥5♥5 ✓（两个对子）；♠5♥5♦5♣5 ✗（每种花色仅 1 张，配不成对）。
+static func _is_four_same_rank(cards: Array) -> bool:
+	if cards.size() != 4 or cards[0].is_joker:
+		return false
+	var rank: int = cards[0].rank
+	var id_counts: Dictionary = {}
+	for c: Card in cards:
+		if c.is_joker or c.rank != rank:
+			return false
+		var key := _identity_key(c)
+		id_counts[key] = id_counts.get(key, 0) + 1
+	for key: String in id_counts:
+		if id_counts[key] % 2 != 0:
+			return false
+	return true
+
+
 ## Extract ranks that appear as pairs. Returns sorted array of ranks.
-## Only works for normal cards (not jokers in pairs).
+##
+## 对子必须是"同花色同点数"（GDD card-types.md §2.1：2 张 suit 和 rank
+## 完全相同的牌），因此按 identity 而非 rank 统计——♠5♥5 不是对子，
+## 不能拿去凑拖拉机。
 static func _extract_pair_ranks(cards: Array) -> Array[int]:
-	# Count occurrences of each rank
-	var rank_counts: Dictionary = {}
+	var id_counts: Dictionary = {}
+	var id_rank: Dictionary = {}
 	for c: Card in cards:
 		if c.is_joker:
 			return []  # Jokers don't participate in tractors
-		var key: int = c.rank
-		rank_counts[key] = rank_counts.get(key, 0) + 1
+		var key := _identity_key(c)
+		id_counts[key] = id_counts.get(key, 0) + 1
+		id_rank[key] = c.rank
 
 	# Extract ranks with count >= 2
 	var result: Array[int] = []
-	for rank: int in rank_counts:
-		var count: int = rank_counts[rank]
+	for key: String in id_counts:
+		var count: int = id_counts[key]
 		while count >= 2:
-			result.append(rank)
+			result.append(id_rank[key])
 			count -= 2
 
 	# Sort by base sequence position
@@ -267,12 +326,26 @@ static func _find_and_remove_tractor(remaining: Array, pair_count: int, current_
 				continue
 
 		if _are_consecutive(window, current_rank):
-			# Remove these pairs from remaining
+			# Remove these pairs from remaining。按 identity 移除，
+			# 否则会把 ♠5♥5 这种"同点数不同花色"错当成一个对子拆掉。
 			for rank: int in window:
+				var target_key := ""
+				var counts: Dictionary = {}
+				for c: Card in remaining:
+					if c.is_joker or c.rank != rank:
+						continue
+					var k := _identity_key(c)
+					counts[k] = counts.get(k, 0) + 1
+				for k: String in counts:
+					if counts[k] >= 2:
+						target_key = k
+						break
+				if target_key == "":
+					return null
 				var removed := 0
 				var idx := 0
 				while idx < remaining.size() and removed < 2:
-					if not remaining[idx].is_joker and remaining[idx].rank == rank:
+					if not remaining[idx].is_joker and _identity_key(remaining[idx]) == target_key:
 						remaining.remove_at(idx)
 						removed += 1
 					else:
@@ -286,16 +359,20 @@ static func _find_and_remove_tractor(remaining: Array, pair_count: int, current_
 
 
 ## Extract pair ranks from a subset of cards (doesn't modify input)
+## 同样按 identity 统计——理由见 _extract_pair_ranks。
 static func _extract_pair_ranks_from(cards: Array) -> Array[int]:
-	var rank_counts: Dictionary = {}
+	var id_counts: Dictionary = {}
+	var id_rank: Dictionary = {}
 	for c: Card in cards:
 		if c.is_joker:
 			continue
-		rank_counts[c.rank] = rank_counts.get(c.rank, 0) + 1
+		var key := _identity_key(c)
+		id_counts[key] = id_counts.get(key, 0) + 1
+		id_rank[key] = c.rank
 	var result: Array[int] = []
-	for rank: int in rank_counts:
-		if rank_counts[rank] >= 2:
-			result.append(rank)
+	for key: String in id_counts:
+		if id_counts[key] >= 2:
+			result.append(id_rank[key])
 	return result
 
 

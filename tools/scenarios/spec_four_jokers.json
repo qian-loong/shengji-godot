@@ -1,0 +1,12 @@
+{
+  "description": "四张王拖拉机：大王×2 + 小王×2，恒为 Tractor，扣底 ×4",
+  "deck_count": 2,
+  "dealer": 0,
+  "trump_suit": 0,
+  "rank": 2,
+  "seed": 7,
+  "require": {
+    "0": ["RedJoker", "RedJoker", "BlackJoker", "BlackJoker"]
+  },
+  "bottom_require": ["♠K", "♠K", "♥K", "♥K", "♦10", "♦10"]
+}

@@ -105,9 +105,3 @@ func apply_settlement(
 		game_over,
 		effective_new_dealer,
 	)
-
-
-## Enforce 必打级: a team cannot advance FROM a no_skip rank unless they have
-## played as dealer at that rank. Walk from current toward target, stopping at
-## the first unplayed no_skip rank.
-##

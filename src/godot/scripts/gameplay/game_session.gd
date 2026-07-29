@@ -19,6 +19,8 @@ var log_path_override: String = ""
 var case_id: String = ""
 var _cli_preset: String = ""
 var _cli_config_path: String = ""
+var _scenario: Dictionary = {}
+var _scenario_consumed: bool = false
 
 const SEAT_NAMES: Array[String] = ["你(南)", "AI-东", "搭档(北)", "AI-西"]
 const TEAM_NAMES: Array[String] = ["南北队", "东西队"]
@@ -89,6 +91,55 @@ func _apply_cli_arg(arg: String) -> void:
 		_cli_config_path = arg.split("=")[1].strip_edges()
 	elif arg.begins_with("--case-id="):
 		case_id = arg.split("=")[1].strip_edges()
+	elif arg.begins_with("--scenario="):
+		_load_scenario(arg.split("=")[1].strip_edges())
+	elif arg.begins_with("--lead-strategy="):
+		_apply_lead_strategy(arg.split("=")[1].strip_edges().to_lower(), true)
+	elif arg == "--max-structure-lead":
+		_apply_lead_strategy("max_structure", true)
+
+
+## 设置 AI 首出策略。
+##
+## 引擎默认是 SIMPLE（只出单张），这是既有批跑基线的前提，不要随意改动默认值——
+## MAX_STRUCTURE 是为了激活对子/拖拉机规则路径写的压测策略，不是经过设计的对局 AI
+## （实测会让下庄率从 0.50 升到 0.75）。要跑覆盖率补充基线请显式传参。
+func _apply_lead_strategy(name: String, verbose: bool = false) -> void:
+	match name:
+		"simple":
+			AIPlayer.lead_strategy = AIPlayer.LeadStrategy.SIMPLE
+		"dump", "dump_happy":
+			AIPlayer.lead_strategy = AIPlayer.LeadStrategy.DUMP_HAPPY
+		"max_structure", "maxstructure":
+			AIPlayer.lead_strategy = AIPlayer.LeadStrategy.MAX_STRUCTURE
+		_:
+			printerr("未知 --lead-strategy=%s，保持默认 simple" % name)
+			return
+	if verbose:
+		print("首出策略: %s" % name)
+
+
+## 载入构造牌局 JSON。scenario 默认同时启用 MAX_STRUCTURE 首出策略 ——
+## 否则即使把拖拉机发到手上，AI 也只会拆成单张出，白构造。
+func _load_scenario(path: String) -> void:
+	if not FileAccess.file_exists(path):
+		printerr("scenario 文件不存在: %s" % path)
+		return
+	var text := FileAccess.get_file_as_string(path)
+	var parsed: Variant = JSON.parse_string(text)
+	if not (parsed is Dictionary):
+		printerr("scenario 解析失败: %s" % path)
+		return
+	_scenario = parsed
+	print("构造牌局: %s" % path)
+	if _scenario.has("description"):
+		print("  说明: %s" % str(_scenario["description"]))
+
+	# 构造牌局默认用 MAX_STRUCTURE —— 否则即使把拖拉机发到手上，
+	# AI 也只会拆成单张出，白构造。可用 spec 的 lead_strategy 覆盖。
+	var strategy := str(_scenario.get("lead_strategy", "max_structure")).to_lower()
+	_apply_lead_strategy(strategy)
+	print("  首出策略: %s" % strategy)
 
 
 ## Resolve config: --config JSON > --preset > classic preset
@@ -246,13 +297,33 @@ func _play_one_round() -> EffectiveSettlement:
 	session_controller.state.current_rank = current_rank
 	session_controller.state.round_num = round_num - 1
 	session_controller.state.is_first_game = is_first_game
-	session_controller.start_round(round_seed)
+
+	var scenario_trump_fixed := false
+	if not _scenario.is_empty():
+		var built := _build_scenario_round()
+		if built.is_empty():
+			printerr("scenario 构建失败，回退随机发牌")
+			session_controller.start_round(round_seed)
+		else:
+			var res := session_controller.start_scenario_round(built)
+			if not res.get("ok", false):
+				printerr("scenario 起局失败: %s，回退随机发牌" % res.get("message", "?"))
+				session_controller.start_round(round_seed)
+			else:
+				scenario_trump_fixed = built.has("trump_suit")
+	else:
+		session_controller.start_round(round_seed)
+
 	game_round = session_controller.game_round
 	round_num = session_controller.state.round_num
 	print("\n--- 发牌完成 ---")
 
-	# Phase 2: Bidding
-	_bidding_phase()
+	# Phase 2: Bidding（scenario 指定了主花色时已跳过）
+	if not scenario_trump_fixed:
+		_bidding_phase()
+	else:
+		print("\n--- 亮主阶段 (scenario 指定: %s) ---" % (
+			"公主" if game_round.trump_suit < 0 else Card.suit_symbol(game_round.trump_suit)))
 
 	# Phase 3: Bury bottom
 	_bury_phase()
@@ -264,6 +335,90 @@ func _play_one_round() -> EffectiveSettlement:
 	var finish := session_controller.finish_round()
 	_sync_host_from_controller()
 	return finish["settlement"]
+
+
+## 把 scenario JSON 里的牌面字符串转成 Card 对象。
+## 只在第一局注入；后续局（若 --max-rounds > 1）回落到随机发牌，
+## 因为构造牌局的意义是命中特定路径，不是打完整场比赛。
+func _build_scenario_round() -> Dictionary:
+	if _scenario_consumed:
+		return {}
+	_scenario_consumed = true
+
+	var raw_hands: Array = _scenario.get("hands", [])
+	if raw_hands.size() != 4:
+		printerr("scenario.hands 必须是 4 个座位")
+		return {}
+
+	var hands: Array = []
+	for seat: int in range(4):
+		var parsed := _parse_card_list(raw_hands[seat])
+		if parsed.is_empty():
+			printerr("scenario.hands[%d] 解析为空" % seat)
+			return {}
+		hands.append(parsed)
+
+	var bottom := _parse_card_list(_scenario.get("bottom", []))
+	if bottom.is_empty():
+		printerr("scenario.bottom 解析为空")
+		return {}
+
+	var built: Dictionary = { "hands": hands, "bottom": bottom }
+	if _scenario.has("dealer"):
+		built["dealer"] = int(_scenario["dealer"])
+	if _scenario.has("trump_suit"):
+		built["trump_suit"] = int(_scenario["trump_suit"])
+	if _scenario.has("rank"):
+		built["rank"] = int(_scenario["rank"])
+	return built
+
+
+## 解析 "♠5" / "RedJoker" 形式的牌面字符串数组。
+static func _parse_card_list(raw: Variant) -> Array:
+	if not (raw is Array):
+		return []
+	var result: Array = []
+	for item: Variant in raw:
+		var card := _parse_card_string(str(item))
+		if card == null:
+			printerr("无法解析牌面: %s" % str(item))
+			return []
+		result.append(card)
+	return result
+
+
+static func _parse_card_string(text: String) -> Card:
+	if text == "RedJoker":
+		return Card.joker(Card.JokerType.BIG)
+	if text == "BlackJoker":
+		return Card.joker(Card.JokerType.SMALL)
+	if text.length() < 2:
+		return null
+
+	var suit_symbol := text.substr(0, 1)
+	var suit := -1
+	match suit_symbol:
+		"♠": suit = Card.Suit.SPADE
+		"♥": suit = Card.Suit.HEART
+		"♦": suit = Card.Suit.DIAMOND
+		"♣": suit = Card.Suit.CLUB
+		_: return null
+
+	var rank_text := text.substr(1)
+	var rank := -1
+	match rank_text:
+		"J": rank = Card.Rank.JACK
+		"Q": rank = Card.Rank.QUEEN
+		"K": rank = Card.Rank.KING
+		"A": rank = Card.Rank.ACE
+		_:
+			if rank_text.is_valid_int():
+				var v := rank_text.to_int()
+				if v >= 2 and v <= 10:
+					rank = v
+	if rank < 0:
+		return null
+	return Card.normal(suit, rank)
 
 
 # ============================================================
@@ -480,13 +635,7 @@ func _display_settlement(s: EffectiveSettlement) -> void:
 		print("  庄家方赢最后一墩，底牌不计分")
 	print("  最终得分: %d" % s.final_score)
 	var side_str := "攻方" if s.upgrading_side == 1 else "庄家方"
-	if s.upgrade_blocked:
-		# 提案想升，但会话层必打级拦回，展示两者差异便于调试。
-		print("  %s 提案升 %d 级 → %s（必打级拦截，实际留在 %s）" % [
-			side_str, s.proposal.upgrade_levels,
-			Card.rank_symbol(s.proposal.new_rank),
-			Card.rank_symbol(s.new_rank)])
-	elif s.upgrade_levels > 0:
+	if s.upgrade_levels > 0:
 		print("  %s 升 %d 级 → 新级: %s" % [side_str, s.upgrade_levels, Card.rank_symbol(s.new_rank)])
 	elif s.dealer_dethroned:
 		print("  攻方下庄（未升级）")

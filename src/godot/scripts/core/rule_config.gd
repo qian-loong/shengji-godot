@@ -150,11 +150,77 @@ func validate() -> Array[String]:
 	if upgrade_threshold > total_score:
 		errors.append("upgrade_threshold (%d) exceeds total_score (%d)" % [upgrade_threshold, total_score])
 
+	# upgrade_threshold 与 upgrade_table 必须自洽。
+	#
+	# 两者描述的是同一件事的两面：表里首个 side==1 的档位就是"攻方翻盘线"，
+	# 而 upgrade_threshold 决定 dealer_dethroned。只改其一会造出矛盾状态——
+	# 例如门槛 100 配 80 档表时，攻方拿 86 分会被表判"攻方赢"、被门槛判"没下庄"。
+	# 改门槛请用 build_upgrade_table() 一并重算表。
+	var attack_entry := get_attack_threshold()
+	if attack_entry >= 0 and attack_entry != upgrade_threshold:
+		errors.append(
+			"upgrade_threshold (%d) disagrees with upgrade_table's first attack tier (%d)"
+			% [upgrade_threshold, attack_entry])
+
 	# Auto-correct: four_same_is_tractor impossible with 1 deck
 	if deck_count == 1 and four_same_is_tractor:
 		four_same_is_tractor = false
 
 	return errors
+
+
+## 升级表中"攻方翻盘线"——首个 side==1 的档位。无攻方档位时返回 -1。
+func get_attack_threshold() -> int:
+	var lowest := -1
+	for row: Array in upgrade_table:
+		if row.size() >= 2 and int(row[1]) == 1:
+			var t := int(row[0])
+			if lowest < 0 or t < lowest:
+				lowest = t
+	return lowest
+
+
+## 按门槛生成升级表。三个预设都遵循同一比例：
+##
+##   庄家档: 0 分升 3 级 / 1~(门槛/2-1) 分升 2 级 / (门槛/2)~(门槛-1) 分升 1 级
+##   攻方档: 门槛 起，每 (门槛/2) 一档，依次 升0 / 升1 / 升2 / 升3 级
+##
+## 例：门槛 80 → [[0,0,3],[1,0,2],[40,0,1],[80,1,0],[120,1,1],[160,1,2],[200,1,3]]
+##     门槛 100 → [[0,0,3],[1,0,2],[50,0,1],[100,1,0],[150,1,1],[200,1,2],[250,1,3]]
+##
+## max_score > 0 时截掉够不到的档位。注意**不能**简单拿 total_score 当上限：
+## final_score = attack_score + bottom_score × 扣底倍数，2 副牌下末墩打对子/拖拉机
+## 能把分数放大到 total_score 之上（competitive 的 250 档就是这么达成的，
+## total_score 才 200）。只有 1 副牌因为凑不出对子、扣底倍数恒为 1，
+## final_score 才封顶在 total_score —— 用 max_deck_capped_score() 取该上限。
+static func build_upgrade_table(threshold: int, max_score: int = 0) -> Array[Array]:
+	var step: int = maxi(1, threshold / 2)
+	var table: Array[Array] = [
+		[0, 0, 3],
+		[1, 0, 2],
+		[step, 0, 1],
+	]
+	for i: int in range(4):
+		var tier: int = threshold + step * i
+		if max_score > 0 and tier > max_score:
+			break
+		table.append([tier, 1, i])
+	return table
+
+
+## 本配置下 final_score 的实际上限；0 表示无有效上限（扣底可放大）。
+##
+## 1 副牌每张牌只有一份，普通牌、级牌（花色不同）、大小王都凑不出对子，
+## 因此末墩必为单张、扣底倍数恒为 1，final_score 不可能超过 total_score。
+## 2 副牌有对子与拖拉机，扣底能成倍放大，不设上限。
+func max_reachable_score() -> int:
+	return total_score if deck_count == 1 else 0
+
+
+## 设置升级门槛并同步重算升级表，避免两者失配（见 validate 里的一致性检查）。
+func set_upgrade_threshold(value: int) -> void:
+	upgrade_threshold = value
+	upgrade_table = build_upgrade_table(value, max_reachable_score())
 
 
 # ============================================================

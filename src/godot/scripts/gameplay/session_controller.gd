@@ -93,6 +93,78 @@ func start_round(seed_value: int = -1) -> Dictionary:
 	})
 
 
+## 起一局预设牌局（scenario）。跳过随机发牌；若指定了 trump_suit 则连叫主一并跳过。
+##
+## 用途：AI 常规策略只首出单张，对子/拖拉机/甩牌等规则分支在随机对局中
+## 永远走不到。scenario 直接把牌发到指定的手上，配合
+## AIPlayer.lead_strategy = MAX_STRUCTURE 就能稳定命中这些路径。
+##
+## scenario 键：
+##   hands       必填，4 个 Array[Card]
+##   bottom      必填，Array[Card]
+##   dealer      可选，默认沿用 state.current_dealer
+##   trump_suit  可选，给了就跳过叫主直接进配底
+func start_scenario_round(scenario: Dictionary) -> Dictionary:
+	if rule_config == null:
+		return _error("missing_rule_config")
+	if not scenario.has("hands") or not scenario.has("bottom"):
+		return _error("scenario_missing_hands_or_bottom")
+
+	var hands: Array = scenario["hands"]
+	if hands.size() != 4:
+		return _error("scenario_hands_must_be_4_seats")
+
+	if scenario.has("dealer"):
+		state.current_dealer = int(scenario["dealer"])
+
+	# 指定本局打几级：写进庄家队的等级，再由 begin_round 同步出 current_rank。
+	# 级牌决定哪些牌归主牌域，是很多规则分支（如四张级牌拖拉机）的前提。
+	if scenario.has("rank"):
+		state.team_ranks[state.current_dealer % 2] = int(scenario["rank"])
+
+	var round_rank := state.begin_round_for_current_dealer()
+	rule_config.current_rank = round_rank
+
+	game_round = GameRound.new()
+	game_round.setup(rule_config, state.current_dealer)
+	game_round.logger = logger
+
+	if logger:
+		logger.begin_round(
+			state.round_num,
+			state.current_rank,
+			state.current_dealer,
+			-1,
+			state.team_ranks
+		)
+
+	game_round.deal_scenario(hands, scenario["bottom"])
+
+	last_settlement = null
+	counter_seat_order = []
+	counter_seat_index = 0
+
+	if scenario.has("trump_suit"):
+		game_round.force_trump(int(scenario["trump_suit"]), state.current_dealer)
+		# 无 BidDeclaration ⇒ 不开反主窗口，直接进配底
+		state.counter_attempted = true
+		bidding_resolved = true
+		current_phase = "burying"
+	else:
+		current_phase = "bidding"
+		bid_seat_index = 0
+		bidding_resolved = false
+
+	return _ok({
+		"phase": current_phase,
+		"round_num": state.round_num,
+		"current_rank": state.current_rank,
+		"current_dealer": state.current_dealer,
+		"trump_suit": game_round.trump_suit,
+		"scenario": true,
+	})
+
+
 func get_bidding_context(seat: int) -> Dictionary:
 	if game_round == null:
 		return _error("missing_game_round")
@@ -200,9 +272,7 @@ func submit_bury(indices: Array[int]) -> Dictionary:
 	if not state.counter_attempted:
 		return _open_counter_window_or_play(result.get("buried", []))
 
-	current_phase = "playing"
-	trick_num = 0
-	_reset_trick_state()
+	_enter_playing()
 	return _ok({
 		"phase": current_phase,
 		"dealer": game_round.dealer_seat,
@@ -254,9 +324,7 @@ func _open_counter_window_or_play(buried: Array = []) -> Dictionary:
 
 	# No counter window: dealer's bury is final, jump straight to playing.
 	state.counter_attempted = true
-	current_phase = "playing"
-	trick_num = 0
-	_reset_trick_state()
+	_enter_playing()
 	return _ok({
 		"phase": current_phase,
 		"dealer": game_round.dealer_seat,
@@ -396,15 +464,23 @@ func _finish_counter_window_no_change() -> Dictionary:
 	state.counter_attempted = true
 	counter_seat_order = []
 	counter_seat_index = 0
-	current_phase = "playing"
-	trick_num = 0
-	_reset_trick_state()
+	_enter_playing()
 	return _ok({
 		"phase": current_phase,
 		"counter_made": false,
 		"dealer": game_round.dealer_seat,
 		"trump_suit": game_round.trump_suit,
 	})
+
+
+## 进入出牌阶段。三条路径（无反抢窗口 / 反抢窗口无人反 / 反家 re-bury 完成）
+## 都必须经由此处，以保证出牌前的手牌快照一定被记录。
+func _enter_playing() -> void:
+	current_phase = "playing"
+	trick_num = 0
+	_reset_trick_state()
+	if logger and game_round:
+		logger.log_hands_at_play_start(game_round.hands)
 
 
 func begin_trick() -> Dictionary:
@@ -474,6 +550,9 @@ func submit_play(seat: int, cards: Array) -> Dictionary:
 
 	var hand := game_round.get_hand(seat)
 	var is_leading := trick_lead_info.is_empty()
+	var dump_failed := false
+	var dump_attempted: Array = []
+	var dump_reason := ""
 	if is_leading:
 		var pattern := PlayValidator.validate_lead(
 			cards,
@@ -484,6 +563,31 @@ func submit_play(seat: int, cards: Array) -> Dictionary:
 		)
 		if pattern == null:
 			return _error("invalid_lead")
+
+		# 甩牌最大性挑战（GDD card-types.md §2.3）。
+		# 判定需要看其他三家的手牌，属于引擎裁决——AI 决策路径不经过这里。
+		if pattern.type == Card.CardType.DUMP:
+			var challenge := PlayValidator.challenge_dump(
+				cards,
+				_collect_other_hands(seat),
+				game_round.trump_suit,
+				state.current_rank,
+				rule_config
+			)
+			if not challenge["ok"]:
+				# 甩牌失败：只出最小的一张单牌，其余收回手中。
+				dump_failed = true
+				dump_attempted = cards.duplicate()
+				dump_reason = str(challenge["reason"])
+				cards = [challenge["fallback_card"]]
+				pattern = PlayValidator.validate_lead(
+					cards, hand, game_round.trump_suit, state.current_rank, rule_config)
+				if pattern == null:
+					return _error("dump_fallback_invalid")
+				if logger:
+					logger.log_dump_failed(
+						seat, dump_attempted, cards[0], dump_reason, trick_num)
+
 		trick_lead_info = _make_lead_info(cards, pattern)
 	else:
 		var lead_count: int = trick_play_cards[0].size()
@@ -512,6 +616,9 @@ func submit_play(seat: int, cards: Array) -> Dictionary:
 			"phase": current_phase,
 			"trick_complete": true,
 			"result": last_trick_result,
+			"dump_failed": dump_failed,
+			"dump_attempted": dump_attempted,
+			"dump_reason": dump_reason,
 		})
 
 	return _ok({
@@ -519,7 +626,21 @@ func submit_play(seat: int, cards: Array) -> Dictionary:
 		"trick_complete": false,
 		"next_seat": trick_seat_order[trick_seat_index],
 		"lead_info": trick_lead_info.duplicate(),
+		"dump_failed": dump_failed,
+		"dump_attempted": dump_attempted,
+		"dump_reason": dump_reason,
 	})
+
+
+## 收集除 seat 外其他三家的手牌，供甩牌最大性裁决使用。
+## 仅限引擎裁决路径调用，不得暴露给 AI 决策。
+func _collect_other_hands(seat: int) -> Array:
+	var result: Array = []
+	for i: int in range(4):
+		if i == seat:
+			continue
+		result.append(game_round.get_hand(i))
+	return result
 
 
 func make_game_state() -> Dictionary:
@@ -573,11 +694,10 @@ func _log_bid_skip(seat: int, reason: String) -> void:
 ##
 ## 严格顺序（必须保证）：
 ##   1. calculate_settlement()：得到得分层提案（不写日志）
-##   2. record_dealer_round()：登记庄家资历，供必打级检查
-##   3. apply_settlement()：叠加跨局约束，得到 EffectiveSettlement + 真实 state
-##   4. log_settlement(effective)：日志记录的是最终裁决，不是提案
-##   5. end_round()：flush 当前 round
-## 反过来（比如在步骤 3 之前写日志）会让日志与真实状态发散。
+##   2. apply_settlement()：应用到会话状态，得到 EffectiveSettlement
+##   3. log_settlement(effective)：日志记录的是最终裁决，不是提案
+##   4. end_round()：flush 当前 round
+## 反过来（比如在步骤 2 之前写日志）会让日志与真实状态发散。
 func finish_round() -> Dictionary:
 	if game_round == null:
 		return _error("missing_game_round")

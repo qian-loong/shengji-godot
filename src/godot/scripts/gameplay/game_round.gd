@@ -76,6 +76,31 @@ func deal(seed_value: int = -1) -> void:
 		logger.log_initial_hands(hands, bottom)
 
 
+## 用预设牌局替代随机发牌 —— 供 scenario 测试局精确命中稀有规则路径。
+## p_hands: 4 个 Array[Card]；p_bottom: Array[Card]
+func deal_scenario(p_hands: Array, p_bottom: Array) -> void:
+	hands = p_hands
+	bottom = p_bottom
+	if logger:
+		logger.log_initial_hands(hands, bottom)
+
+
+## 直接指定主花色与庄家，跳过叫主阶段。仅供 scenario 使用。
+## 与 process_bid 不同，这里不产生 BidDeclaration，因此也不会开启反主窗口。
+func force_trump(p_trump_suit: int, p_dealer_seat: int) -> void:
+	trump_suit = p_trump_suit
+	dealer_seat = p_dealer_seat
+	dealer_team = [dealer_seat, (dealer_seat + 2) % 4]
+	attack_team = []
+	for i: int in range(4):
+		if i not in dealer_team:
+			attack_team.append(i)
+	current_lead_seat = dealer_seat
+	bury_seat = dealer_seat
+	if logger:
+		logger.log_trump_determined(trump_suit)
+
+
 # ============================================================
 # Phase 2: Bidding
 # ============================================================

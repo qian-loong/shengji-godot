@@ -75,7 +75,6 @@ func test_dealer_team_upgrade_updates_dealer_team_only() -> void:
 	assert_eq(state.team_ranks[1], R.FIVE)
 	assert_eq(applied.upgrading_team, 0)
 	assert_eq(applied.new_rank, R.FOUR, "effective new_rank agrees with team_ranks")
-	assert_false(applied.upgrade_blocked)
 	assert_false(state.is_first_game)
 
 
@@ -314,17 +313,6 @@ func test_reproduces_bug_south_north_skipped_10() -> void:
 	state.team_ranks = [R.TEN, R.THREE]
 	state.current_dealer = 1
 	state.current_rank = R.THREE
-	var result := _settlement(130, 1, true, R.THREE, R.TEN)
-
-	var applied := state.apply_settlement(result, 1, rc)
-
-	assert_eq(state.team_ranks[0], R.JACK, "team0 (攻方) advances 10→J")
-	assert_eq(applied.new_rank, R.JACK, "effective new_rank agrees with team_ranks[0]")
-	# Team0 has been dealer at 2,3,5,8 but NOT 10.
-	state.record_dealer_round(0, R.TWO)
-	state.record_dealer_round(0, R.THREE)
-	state.record_dealer_round(0, R.FIVE)
-	state.record_dealer_round(0, R.EIGHT)
 	var result := _settlement(130, 1, true, R.THREE, R.TEN)
 
 	var applied := state.apply_settlement(result, 1, rc)

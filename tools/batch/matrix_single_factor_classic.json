@@ -1,0 +1,61 @@
+{
+  "name": "single_factor_classic_v1",
+  "description": "经典预设为基底的单因子扫描：每次只改一个字段，对照 baseline。经典是 2 副牌、80 分门槛、升级步数 1、必打级关闭。",
+  "base_preset": "classic",
+  "games_per_case": 3,
+  "max_rounds": 30,
+  "seed_base": 42,
+  "factors": [
+    {
+      "id": "baseline",
+      "description": "经典预设原样（对照）",
+      "overrides": {}
+    },
+    {
+      "id": "no_skip_on",
+      "description": "启用必打等级 5/10/K（经典默认关闭）",
+      "overrides": { "no_skip_enabled": true, "no_skip_ranks": [5, 10, 13] }
+    },
+    {
+      "id": "upgrade_step_2",
+      "description": "升级步数改为 2（对照经典默认 1）",
+      "overrides": { "upgrade_step": 2 }
+    },
+    {
+      "id": "threshold_100",
+      "description": "升级门槛 100（接近竞技）—— 门槛与升级表必须同改，否则两者失配",
+      "overrides": {
+        "upgrade_threshold": 100,
+        "upgrade_table": [
+          [0, 0, 3],
+          [1, 0, 2],
+          [50, 0, 1],
+          [100, 1, 0],
+          [150, 1, 1],
+          [200, 1, 2],
+          [250, 1, 3]
+        ]
+      }
+    },
+    {
+      "id": "allow_dump_off",
+      "description": "禁用甩牌",
+      "overrides": { "allow_dump": false }
+    },
+    {
+      "id": "strict_follow_off",
+      "description": "关闭严格跟牌结构（宽松跟牌）",
+      "overrides": { "strict_follow_structure": false }
+    },
+    {
+      "id": "four_same_off",
+      "description": "四张相同不算拖拉机",
+      "overrides": { "four_same_is_tractor": false }
+    },
+    {
+      "id": "tractor_rank_off",
+      "description": "级牌不可参与拖拉机",
+      "overrides": { "tractor_allow_rank_card": false }
+    }
+  ]
+}

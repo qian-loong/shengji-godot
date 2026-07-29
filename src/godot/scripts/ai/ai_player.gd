@@ -5,6 +5,25 @@ extends RefCounted
 
 
 # ============================================================
+# Lead strategy switch
+# ============================================================
+
+enum LeadStrategy {
+	SIMPLE,         ## 只首出单张（既有行为）
+	MAX_STRUCTURE,  ## 优先首出最大结构：拖拉机 > 对子 > 单张
+	DUMP_HAPPY,     ## 尽量甩牌：同域多张一次打出（用于压测甩牌规则）
+}
+
+## 首出策略。默认 SIMPLE 以保持既有对局基线不变。
+##
+## SIMPLE 下 AI 永远只出单张，导致 allow_dump / strict_follow_structure /
+## tractor_allow_rank_card / four_same_is_tractor 等规则分支在批跑中永不触发
+## （实测 54387 墩首出 100% 单张）。scenario 模式会切到 MAX_STRUCTURE
+## 来激活这些路径。
+static var lead_strategy: LeadStrategy = LeadStrategy.SIMPLE
+
+
+# ============================================================
 # Bid decision
 # ============================================================
 
@@ -159,8 +178,132 @@ static func decide_play(seat_id: int, hand: Array, lead_info: Dictionary, game_s
 # Lead decision
 # ============================================================
 
+## 找出手牌中"最大的可首出结构"：最长拖拉机 > 对子 > 空（空则回退单张策略）。
+##
+## 首出必须同一花色域，因此先按域分组，再在组内找连续对子。
+## 是否构成拖拉机交给 CardPattern.identify 判定，从而自动尊重
+## tractor_allow_rank_card / four_same_is_tractor 等配置。
+static func _decide_lead_max_structure(hand: Array, trump_suit: int, current_rank: int, rc: RuleConfig) -> Array:
+	var jat := rc.joker_always_trump
+
+	# 按花色域分组
+	var groups: Dictionary = {}
+	for c: Card in hand:
+		var dom := TrumpJudge.get_suit_domain(c, trump_suit, current_rank, jat)
+		var key: String
+		if dom["type"] == TrumpJudge.DomainType.TRUMP:
+			key = "trump"
+		elif dom["type"] == TrumpJudge.DomainType.SIDE:
+			key = "side_%d" % dom["suit"]
+		else:
+			continue
+		if not groups.has(key):
+			groups[key] = []
+		groups[key].append(c)
+
+	var best: Array = []
+
+	for key: String in groups:
+		var group: Array = groups[key]
+
+		# 组内按 identity 找对子
+		var by_identity: Dictionary = {}
+		for c: Card in group:
+			var id_key: String
+			if c.is_joker:
+				id_key = "joker_%d" % c.joker_type
+			else:
+				id_key = "%d_%d" % [c.suit, c.rank]
+			if not by_identity.has(id_key):
+				by_identity[id_key] = []
+			by_identity[id_key].append(c)
+
+		var pairs: Array = []
+		for id_key: String in by_identity:
+			var same: Array = by_identity[id_key]
+			if same.size() >= 2:
+				pairs.append({ "rank": same[0].rank, "cards": [same[0], same[1]] })
+
+		if pairs.is_empty():
+			continue
+
+		pairs.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			return Card.RANK_SEQUENCE.find(a["rank"]) < Card.RANK_SEQUENCE.find(b["rank"])
+		)
+
+		# 从最长窗口往下试，命中拖拉机即止
+		var found_tractor := false
+		for length: int in range(pairs.size(), 1, -1):
+			for start: int in range(pairs.size() - length + 1):
+				var candidate: Array = []
+				for i: int in range(start, start + length):
+					candidate.append_array(pairs[i]["cards"])
+				var pattern := CardPattern.identify(
+					candidate, current_rank,
+					rc.tractor_allow_rank_card, rc.four_same_is_tractor)
+				if pattern != null and pattern.type == Card.CardType.TRACTOR:
+					if candidate.size() > best.size():
+						best = candidate
+					found_tractor = true
+					break
+			if found_tractor:
+				break
+
+		# 没有拖拉机时退而求其次：出一个对子
+		if not found_tractor and best.size() < 2:
+			best = pairs[0]["cards"]
+
+	return best
+
+
+## 尽量甩牌：在同一花色域内挑 3 张打出去（对子 + 单张的组合最易构成 Dump）。
+##
+## 只用于压测甩牌规则路径 —— 它**故意不判断**"每个组成部分是否该域最大"，
+## 因为那正是要检验引擎有没有拦住的东西（GDD card-types.md §2.3）。
+static func _decide_lead_dump(hand: Array, trump_suit: int, current_rank: int, rc: RuleConfig) -> Array:
+	if not rc.allow_dump:
+		return []
+
+	var jat := rc.joker_always_trump
+	var groups: Dictionary = {}
+	for c: Card in hand:
+		var dom := TrumpJudge.get_suit_domain(c, trump_suit, current_rank, jat)
+		if dom["type"] != TrumpJudge.DomainType.SIDE:
+			continue  # 只在副牌域甩，避免动用主牌
+		var key: int = dom["suit"]
+		if not groups.has(key):
+			groups[key] = []
+		groups[key].append(c)
+
+	for key: int in groups:
+		var group: Array = groups[key]
+		if group.size() < 3:
+			continue
+		group.sort_custom(func(a: Card, b: Card) -> bool:
+			return TrumpJudge.get_sort_value(a, trump_suit, current_rank, jat) \
+				> TrumpJudge.get_sort_value(b, trump_suit, current_rank, jat)
+		)
+		var candidate: Array = [group[0], group[1], group[2]]
+		var pattern := CardPattern.identify(
+			candidate, current_rank, rc.tractor_allow_rank_card, rc.four_same_is_tractor)
+		if pattern != null and pattern.type == Card.CardType.DUMP:
+			return candidate
+
+	return []
+
+
 static func _decide_lead(hand: Array, trump_suit: int, current_rank: int, rc: RuleConfig) -> Array:
 	var jat := rc.joker_always_trump
+
+	if lead_strategy == LeadStrategy.DUMP_HAPPY:
+		var dumped := _decide_lead_dump(hand, trump_suit, current_rank, rc)
+		if not dumped.is_empty():
+			return dumped
+
+	if lead_strategy == LeadStrategy.MAX_STRUCTURE:
+		var structured := _decide_lead_max_structure(hand, trump_suit, current_rank, rc)
+		if not structured.is_empty():
+			return structured
 
 	# Count trump vs side
 	var trump_cards: Array = []

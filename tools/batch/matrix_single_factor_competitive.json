@@ -1,0 +1,56 @@
+{
+  "name": "single_factor_competitive_v1",
+  "description": "竞技预设为基底的单因子扫描：每次只改一个字段，对照 baseline。竞技是 2 副牌、100 分门槛、50 分档距、必打级 5/10/K 开启。",
+  "base_preset": "competitive",
+  "games_per_case": 3,
+  "max_rounds": 30,
+  "seed_base": 42,
+  "factors": [
+    {
+      "id": "baseline",
+      "description": "竞技预设原样（对照）",
+      "overrides": {}
+    },
+    {
+      "id": "no_skip_off",
+      "description": "关闭必打等级（竞技默认开启）",
+      "overrides": { "no_skip_enabled": false, "no_skip_ranks": [] }
+    },
+    {
+      "id": "no_skip_ace_only",
+      "description": "必打等级仅 A —— 检验单元素必打级集合",
+      "overrides": { "no_skip_enabled": true, "no_skip_ranks": [14] }
+    },
+    {
+      "id": "upgrade_step_2",
+      "description": "升级步数改为 2，与必打级叠加（检验拦截与乘数的交互）",
+      "overrides": { "upgrade_step": 2 }
+    },
+    {
+      "id": "classic_table",
+      "description": "换用经典 80 分门槛与升级表（门槛与表必须同改，否则两者失配）",
+      "overrides": {
+        "upgrade_threshold": 80,
+        "upgrade_table": [
+          [0, 0, 3],
+          [1, 0, 2],
+          [40, 0, 1],
+          [80, 1, 0],
+          [120, 1, 1],
+          [160, 1, 2],
+          [200, 1, 3]
+        ]
+      }
+    },
+    {
+      "id": "allow_dump_off",
+      "description": "禁用甩牌",
+      "overrides": { "allow_dump": false }
+    },
+    {
+      "id": "strict_follow_off",
+      "description": "关闭严格跟牌结构",
+      "overrides": { "strict_follow_structure": false }
+    }
+  ]
+}

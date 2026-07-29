@@ -1,0 +1,13 @@
+{
+  "description": "级牌参与拖拉机：主♠、级5 时 ♠5♠5♠6♠6 同在主牌域，受 tractor_allow_rank_card 控制",
+  "deck_count": 2,
+  "dealer": 0,
+  "trump_suit": 0,
+  "rank": 5,
+  "seed": 31,
+  "lead_strategy": "max_structure",
+  "require": {
+    "0": ["♠5", "♠5", "♠6", "♠6", "♠7", "♠7"]
+  },
+  "bottom_require": ["♥K", "♥K"]
+}
