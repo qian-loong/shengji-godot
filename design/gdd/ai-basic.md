@@ -67,6 +67,33 @@ MVP 策略（按优先级）：
 3. 如果攻方（己方为攻方时）需要拿分 → 出含分牌的花色
 4. 默认：出最短门副牌的小牌（减少被杀风险）
 
+**首出策略开关（`AIPlayer.lead_strategy`）**
+
+| 值 | 行为 | 用途 |
+|----|------|------|
+| `SIMPLE` | 只首出单张（上述 MVP 策略） | **默认值**，既有对局与批跑基线的前提 |
+| `MAX_STRUCTURE` | 优先首出最大结构：最长拖拉机 > 对子 > 单张 | 激活对子/拖拉机规则路径 |
+| `DUMP_HAPPY` | 在副牌域内尽量甩牌 | 压测甩牌最大性校验 |
+
+**不要随意改动默认值。** `SIMPLE` 下 AI 永远只出单张，实测 54387 墩首出
+100% 是单张，导致 `allow_dump` / `strict_follow_structure` /
+`tractor_allow_rank_card` / `four_same_is_tractor` 四个配置维度在随机批跑中
+完全不触发。但 `MAX_STRUCTURE` **不是经过设计的对局策略** —— 它只会"能打最长
+拖拉机就打"，不区分攻守、不留后手，实测把下庄率从 0.50 推到 0.75、对局墩数
+减少 29%。它是为覆盖规则路径写的压测工具，不是 AI 质量改进。
+
+真正的 AI 出牌策略改进（何时该打拖拉机、庄家方与攻方的差异、留牌逻辑、
+**以及靠记牌推断该不该甩牌**）属于本文档的后续设计议题。
+
+覆盖率补充跑用显式传参，与默认基线分开存放：
+
+```bash
+python tools/batch/run_batch.py <manifest> --lead-strategy max_structure --run-id cov-xxx
+```
+
+构造牌局（`--scenario`）默认启用 `MAX_STRUCTURE`，可用 spec 的
+`lead_strategy` 字段覆盖。
+
 **跟牌决策**：
 
 ```

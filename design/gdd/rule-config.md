@@ -93,6 +93,38 @@
 - `trump_mode != Fixed` 时，`fixed_trump_suit` 忽略
 - `trump_mode = NoTrump` 时，`joker_always_trump` 决定王牌是否仍为主
 - `upgrade_threshold` 不得超过 `deck_count × 100`
+- **`upgrade_threshold` 必须等于 `upgrade_table` 中首个 `side==1` 的档位**
+
+#### upgrade_threshold 与 upgrade_table 的一致性
+
+两者描述同一件事的两面：表里首个"攻方档"就是攻方翻盘线，
+而 `upgrade_threshold` 决定 `dealer_dethroned`。**只改其一会造出矛盾配置** ——
+例如门槛设 100 却保留 80 分表时，攻方拿 86 分会被表判「攻方赢」、
+被门槛判「没下庄」。
+
+三个预设都遵循同一比例：
+
+| 预设 | 门槛 | 庄家中档 | 攻方档位 |
+|------|------|----------|----------|
+| 经典 | 80 | 40 | 80 / 120 / 160 / 200 |
+| 竞技 | 100 | 50 | 100 / 150 / 200 / 250 |
+| 快速 | 60 | 30 | 60 / 90 / 120 |
+
+> 庄家中档 = 门槛 / 2；攻方首档 = 门槛；攻方档距 = 门槛 / 2
+
+因此改门槛应使用同步方法，而非直接赋值：
+
+```
+RuleConfig.build_upgrade_table(threshold, max_score) → Array   # 按上述比例生成
+config.set_upgrade_threshold(value)                            # 改门槛并重算表
+config.get_attack_threshold() → int                            # 读表里的攻方首档
+config.max_reachable_score() → int                             # final_score 上限，0 = 无上限
+```
+
+`max_reachable_score()` 仅对 1 副牌返回 `total_score`：1 副牌每张牌只有一份，
+普通牌、级牌（花色不同）、大小王都凑不出对子，末墩必为单张、扣底倍数恒为 1，
+`final_score` 因此封顶。2 副牌有对子与拖拉机，扣底能把分数放大到 `total_score`
+之上（竞技的 250 档就是这么达成的，其 `total_score` 才 200），故不设上限。
 
 ### States and Transitions
 

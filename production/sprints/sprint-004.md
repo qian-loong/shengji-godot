@@ -4,8 +4,9 @@
 
 **Sprint 周期**: 2026-07-26 → 2026-08-09 (2周)
 
-**状态（2026-07-28 收口）**: S4-01～S4-05 代码主路径已完成；sprint-status 已同步为 done。  
-后续体验项见 `production/polish-backlog.md`；headless 批跑配置矩阵为下一阶段工作。
+**状态（2026-07-29 更新）**: S4-01～S4-05 代码主路径已完成；sprint-status 已同步为 done。  
+headless 批跑配置矩阵**已完成**（三预设单因子矩阵 + 配置驱动校验器 + 构造牌局注入），
+详见下方「批跑与校验工具链」。后续体验项见 `production/polish-backlog.md`。
 
 ---
 
@@ -106,6 +107,38 @@
 
 ## 后续（非本 sprint 阻塞）
 
-1. Headless 批跑：`--preset` / `--config` + 配置矩阵 + 汇总脚本  
-2. Polish：墩内实时比大、拖选、出牌跳动、主菜单信息架构（见 polish-backlog）  
-3. Android 模拟器验证预设/配置 UI  
+1. ~~Headless 批跑：`--preset` / `--config` + 配置矩阵 + 汇总脚本~~ **已完成**
+2. Polish：墩内实时比大、拖选、出牌跳动、主菜单信息架构（见 polish-backlog）
+3. Android 模拟器验证预设/配置 UI
+4. AI 出牌策略设计（见 `design/gdd/ai-basic.md` 的首出策略开关一节）
+5. 甩牌失败的 UI 表现（`play-animation.md` 已规定动画，目前只有逻辑层）
+
+---
+
+## 批跑与校验工具链（2026-07-29 完成）
+
+| 工具 | 职责 |
+|------|------|
+| `tools/validate_game_log.py` | **唯一规则源**。配置驱动复算：牌型/赢墩/跟牌合法性/牌张归属/结算全字段/跨局连续性/守恒。缺字段 FATAL 而非静默默认 |
+| `tools/export_game_log_html.py` | HTML 复盘页，纯渲染。规则判定全部委托校验器（原自带的 340 行规则实现已删除） |
+| `tools/batch/run_batch.py` | 批跑，每局跑完即校验；`--lead-strategy` 切首出策略；退出码可做 CI 门禁 |
+| `tools/batch/summarize_batch.py` | 汇总，含首出牌型覆盖率与违规类型统计 |
+| `tools/batch/generate_matrix.py` | 展开配置矩阵，写盘前拦截门槛/升级表失配 |
+| `tools/scenarios/make_scenario.py` | 构造牌局生成器，含牌张守恒自检 |
+| `tools/tests/test_validate_game_log.py` | 校验器回归测试（64 项，含变异检出与预设镜像一致性） |
+
+**矩阵**：三预设各一份单因子扫描（`matrix_single_factor_{classic,competitive,quick}.json`）。
+
+**构造牌局**（`--scenario`）：随机对局里 AI 只首出单张，对子/拖拉机/甩牌路径永不触发，
+需靠构造牌局命中。已覆盖四张级牌拖拉机、四张王、严格跟牌、级牌参与拖拉机、甩牌最大性。
+
+### 本阶段修掉的规则 Bug
+
+| Bug | 说明 |
+|-----|------|
+| 对子按 rank 统计 | `_extract_pair_ranks` 与 `_is_pair`（equals）语义冲突，`♠5♥5♠6♥6` 四张散牌被判为拖拉机 |
+| `four_same_is_tractor` 死配置 | 原用"4 张完全相同"需 4 副牌，任何合法配置下都触发不了。已改为"同点数 4 张" |
+| 甩牌最大性未校验 | GDD 在四个文档里定义了规则链，实现完全缺失。已补 `PlayValidator.challenge_dump` |
+| `upgrade_threshold` 与表失配 | 两字段可独立修改，产生矛盾配置。已加 `validate()` 校验 + `build_upgrade_table()` |
+| 测试文件静默失效 | `test_session_state.gd` 的 Parse Error 让整个文件 18 个测试未被 GUT 加载 |
+| headless 每局崩溃 | `game_session.gd` 引用已删除的 `upgrade_blocked` 字段 |
