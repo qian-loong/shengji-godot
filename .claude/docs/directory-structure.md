@@ -5,11 +5,12 @@
 ├── CLAUDE.md                    # Master configuration
 ├── .claude/                     # Agent definitions, skills, hooks, rules, docs
 ├── src/                         # Game source code (core, gameplay, ai, networking, ui, tools)
+│   └── godot/tests/             # ← GUT 测试实际位置（res://tests，见 src/CLAUDE.md）
 ├── assets/                      # Game assets (art, audio, vfx, shaders, data)
 ├── design/                      # Game design documents (gdd, narrative, levels, balance)
 ├── docs/                        # Technical documentation (architecture, api, postmortems)
 │   └── engine-reference/        # Curated engine API snapshots (version-pinned)
-├── tests/                       # Test suites (unit, integration, performance, playtest)
+├── tests/                       # 模板默认位置，本项目**不使用**（在 res:// 之外，GUT 加载不到）
 ├── tools/                       # Build and pipeline tools (ci, build, asset-pipeline)
 ├── prototypes/                  # Throwaway prototypes (isolated from src/)
 └── production/                  # Production management (sprints, milestones, releases)

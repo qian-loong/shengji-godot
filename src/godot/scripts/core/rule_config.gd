@@ -150,6 +150,11 @@ func validate() -> Array[String]:
 	if upgrade_threshold > total_score:
 		errors.append("upgrade_threshold (%d) exceeds total_score (%d)" % [upgrade_threshold, total_score])
 
+	# upgrade_step 直接乘进升级级数，失控的值会让一局直接打到 A 结束游戏。
+	# 取值范围见 GDD rule-config.md 参数表（1–3）。
+	if upgrade_step < 1 or upgrade_step > 3:
+		errors.append("upgrade_step (%d) must be between 1 and 3" % upgrade_step)
+
 	# upgrade_threshold 与 upgrade_table 必须自洽。
 	#
 	# 两者描述的是同一件事的两面：表里首个 side==1 的档位就是"攻方翻盘线"，
@@ -413,10 +418,10 @@ static func _create_classic_preset() -> RuleConfig:
 	config.current_rank = 2
 	# 定主方式：亮主
 	config.trump_mode = TrumpMode.BID
-	config.bid_requires_joker = false
-	# 王牌规则：大小王始终是王牌
+	config.bid_requires_joker = true
+	# 王牌规则：大小王始终是王牌，且亮主时王的颜色须与级牌花色匹配
 	config.joker_always_trump = true
-	config.trump_joker_color_match = false
+	config.trump_joker_color_match = true
 	# 出牌规则：允许甩牌，严格跟牌
 	config.allow_dump = true
 	config.strict_follow_structure = true
@@ -438,8 +443,9 @@ static func _create_classic_preset() -> RuleConfig:
 		[160, 1, 2],  # 闲家160-199分→升2级
 		[200, 1, 3]   # 闲家200+分→升3级
 	]
-	config.no_skip_enabled = false
-	config.no_skip_ranks = []
+	# 必打级：5、10、K 不可跳过（GDD rule-config.md 经典预设表）
+	config.no_skip_enabled = true
+	config.no_skip_ranks = [Card.Rank.FIVE, Card.Rank.TEN, Card.Rank.KING]
 	# 发牌顺序：随机
 	config.initial_dealer = -1
 	return config

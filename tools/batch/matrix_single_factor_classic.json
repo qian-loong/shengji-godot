@@ -1,6 +1,6 @@
 {
   "name": "single_factor_classic_v1",
-  "description": "经典预设为基底的单因子扫描：每次只改一个字段，对照 baseline。经典是 2 副牌、80 分门槛、升级步数 1、必打级关闭。",
+  "description": "经典预设为基底的单因子扫描：每次只改一个字段，对照 baseline。经典是 2 副牌、80 分门槛、升级步数 1、必打级 5/10/K 开启、亮主需持王且王色须匹配。",
   "base_preset": "classic",
   "games_per_case": 3,
   "max_rounds": 30,
@@ -12,9 +12,19 @@
       "overrides": {}
     },
     {
-      "id": "no_skip_on",
-      "description": "启用必打等级 5/10/K（经典默认关闭）",
-      "overrides": { "no_skip_enabled": true, "no_skip_ranks": [5, 10, 13] }
+      "id": "no_skip_off",
+      "description": "关闭必打等级（经典默认开启 5/10/K）",
+      "overrides": { "no_skip_enabled": false, "no_skip_ranks": [] }
+    },
+    {
+      "id": "bid_no_joker",
+      "description": "亮主不需持王（经典默认需要）—— 定主门槛降低，公主局应减少",
+      "overrides": { "bid_requires_joker": false }
+    },
+    {
+      "id": "joker_color_free",
+      "description": "王色无需匹配级牌花色（经典默认需匹配）",
+      "overrides": { "trump_joker_color_match": false }
     },
     {
       "id": "upgrade_step_2",
