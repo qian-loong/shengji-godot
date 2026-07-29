@@ -26,6 +26,9 @@ REPO = Path(__file__).resolve().parents[2]
 GODOT_PROJECT = REPO / "src" / "godot"
 SESSION_SCRIPT = "res://scripts/gameplay/game_session.gd"
 
+sys.path.insert(0, str(REPO / "tools"))
+from validate_game_log import force_utf8_stdout, validate_file  # noqa: E402
+
 
 def find_godot() -> str:
     exe = os.environ.get("GODOT_EXE") or os.environ.get("GODOT")
@@ -43,6 +46,7 @@ def run_one(
     max_rounds: int,
     case_id: str,
     timeout: int,
+    lead_strategy: str | None = None,
 ) -> dict:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     # Godot user args after script; also pass as plain args for compatibility
@@ -59,6 +63,8 @@ def run_one(
         f"--log-path={log_path}",
         f"--case-id={case_id}",
     ]
+    if lead_strategy:
+        cmd.append(f"--lead-strategy={lead_strategy}")
     t0 = time.time()
     try:
         proc = subprocess.run(
@@ -93,12 +99,48 @@ def run_one(
         }
 
 
+def validate_log(log_path: Path) -> dict:
+    """对单局日志跑规则校验，返回可入 run_results.json 的精简结果。
+
+    跑得完 ≠ 跑得对：returncode 只能说明进程没崩，逻辑正确性要靠复算。
+    """
+    if not log_path.is_file():
+        return {"ok": False, "fatal": "missing_log", "errors": 0, "warnings": 0, "codes": []}
+    result = validate_file(log_path)
+    codes = sorted({i["code"] for i in result["issues"] if i["level"] == "error"})
+    return {
+        "ok": result["ok"],
+        "fatal": result["fatal"],
+        "errors": result["errors"],
+        "warnings": result["warnings"],
+        "codes": codes,
+        "skipped": result["skipped"],
+    }
+
+
 def main() -> int:
+    force_utf8_stdout()
+
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("manifest", type=Path, help="manifest.json from generate_matrix.py")
     ap.add_argument("--games", type=int, default=None, help="Override games_per_case")
     ap.add_argument("--max-rounds", type=int, default=None, help="Override max_rounds")
     ap.add_argument("--timeout", type=int, default=180, help="Per-game timeout seconds")
+    ap.add_argument(
+        "--lead-strategy",
+        choices=["simple", "max_structure", "dump"],
+        default=None,
+        help=(
+            "Override AI lead strategy. Engine default is 'simple' (singles only). "
+            "'max_structure' activates pair/tractor rule paths but shifts the balance "
+            "baseline (dethrone rate 0.50 -> 0.75) — keep it in a separate run-id."
+        ),
+    )
+    ap.add_argument(
+        "--no-validate",
+        action="store_true",
+        help="Skip rule validation (only check the process exit code)",
+    )
     ap.add_argument(
         "--run-id",
         default=None,
@@ -130,6 +172,8 @@ def main() -> int:
     godot = find_godot()
     print(f"GODOT_EXE={godot}")
     print(f"run_id={run_id} games/case={games} max_rounds={max_rounds}")
+    if args.lead_strategy:
+        print(f"lead_strategy={args.lead_strategy}（非默认 —— 与 simple 基线不可直接对比）")
     print(f"out={rel(out_root)}")
 
     results = {
@@ -138,6 +182,7 @@ def main() -> int:
         "games_per_case": games,
         "max_rounds": max_rounds,
         "seed_base": seed_base,
+        "lead_strategy": args.lead_strategy or "simple",
         "cases": [],
     }
 
@@ -161,7 +206,8 @@ def main() -> int:
             seed = seed_base + g
             log_path = case_dir / f"game_{g:02d}_seed{seed}.json"
             print(f"  game {g+1}/{games} seed={seed} ...", end=" ", flush=True)
-            r = run_one(godot, config_path, log_path, seed, max_rounds, case_id, args.timeout)
+            r = run_one(godot, config_path, log_path, seed, max_rounds, case_id,
+                        args.timeout, args.lead_strategy)
             # normalize log path in result
             if r.get("log"):
                 try:
@@ -171,7 +217,19 @@ def main() -> int:
             # run_one stores absolute-ish; recompute
             if log_path.is_file():
                 r["log"] = rel(log_path)
+
             status = "OK" if r["ok"] else f"FAIL(rc={r['returncode']})"
+
+            if not args.no_validate:
+                v = validate_log(log_path)
+                r["validation"] = v
+                if v["fatal"]:
+                    status += f" | 校验中断: {v['fatal']}"
+                elif not v["ok"]:
+                    status += f" | 规则违规 {v['errors']} 处: {','.join(v['codes'][:4])}"
+                else:
+                    status += " | 校验通过"
+
             print(f"{status} {r['elapsed_sec']}s")
             if not r["ok"] and r.get("stderr_tail"):
                 print(f"    stderr: {r['stderr_tail'][:300]}")
@@ -196,8 +254,31 @@ def main() -> int:
     results_path.write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"\nrun_results: {rel(results_path)}")
     print("Next: python tools/batch/summarize_batch.py " + rel(results_path))
-    failed = sum(1 for c in results["cases"] for g in c.get("games", []) if not g.get("ok"))
-    return 1 if failed else 0
+
+    all_games = [g for c in results["cases"] for g in c.get("games", [])]
+    failed = sum(1 for g in all_games if not g.get("ok"))
+    invalid = sum(
+        1 for g in all_games
+        if isinstance(g.get("validation"), dict) and not g["validation"]["ok"]
+    )
+
+    print(f"\n运行失败 {failed}/{len(all_games)} 局", end="")
+    if args.no_validate:
+        print("（已跳过规则校验 —— 本次结果不能证明逻辑正确）")
+    else:
+        print(f"，规则违规 {invalid}/{len(all_games)} 局")
+        if invalid:
+            offenders: dict[str, int] = {}
+            for g in all_games:
+                v = g.get("validation")
+                if isinstance(v, dict) and not v["ok"]:
+                    for code in (v["codes"] or [v["fatal"] or "unknown"]):
+                        offenders[code] = offenders.get(code, 0) + 1
+            print("违规类型:")
+            for code, n in sorted(offenders.items(), key=lambda kv: -kv[1]):
+                print(f"  {n:3d} × {code}")
+
+    return 1 if (failed or invalid) else 0
 
 
 if __name__ == "__main__":

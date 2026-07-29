@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""
-Export a game log JSON file to an interactive single-file HTML replay.
+"""把对局日志导出成单文件的交互式 HTML 复盘页。
 
-The exporter intentionally re-implements the core rule checks instead of
-importing Godot scripts, so replay pages can expose disagreements between the
-logged game state and an independent analyzer.
+**规则判定全部委托 tools/validate_game_log.py**，本文件只负责可视化。
+
+历史上这个导出器自带一整套规则实现（域判定 / 牌型 / 赢墩 / 结算复算约 340 行），
+目的是"独立复算以暴露分歧"。但它随配置系统演进而失效——不认 upgrade_step、
+按 rank 而非 identity 统计对子、four_same 用旧语义——对 quick 预设会报出 20 条
+全假的错误，噪声把真问题淹没。现在统一由校验器提供判定，本文件不再持有第二套规则。
+
+用法:
+  python tools/export_game_log_html.py <game_log.json> [-o out.html]
 """
 
 from __future__ import annotations
@@ -12,458 +17,218 @@ from __future__ import annotations
 import argparse
 import html
 import json
-from dataclasses import dataclass
+import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional
 
+TOOLS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(TOOLS_DIR))
 
-SUIT_SYMBOL_TO_ID = {"♠": 0, "♥": 1, "♦": 2, "♣": 3}
-SUIT_ID_TO_SYMBOL = {v: k for k, v in SUIT_SYMBOL_TO_ID.items()}
-RANK_SYMBOL_TO_VALUE = {
-    "2": 2,
-    "3": 3,
-    "4": 4,
-    "5": 5,
-    "6": 6,
-    "7": 7,
-    "8": 8,
-    "9": 9,
-    "10": 10,
-    "J": 11,
-    "Q": 12,
-    "K": 13,
-    "A": 14,
-}
-RANK_VALUE_TO_SYMBOL = {v: k for k, v in RANK_SYMBOL_TO_VALUE.items()}
-RANK_SEQUENCE = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
-POINT_VALUES = {5: 5, 10: 10, 13: 10}
-DEFAULT_UPGRADE_TABLE = [
-    (0, 0, 3),
-    (1, 0, 2),
-    (40, 0, 1),
-    (80, 1, 0),
-    (120, 1, 1),
-    (160, 1, 2),
-    (200, 1, 3),
-]
-NO_SKIP_RANKS = {5, 10, 13}
+from validate_game_log import (  # noqa: E402
+    Card,
+    LogFormatError,
+    LogValidator,
+    RuleConfig,
+    Rules,
+    force_utf8_stdout,
+    parse_cards,
+    rank_symbol,
+)
+
+SUIT_ID_TO_SYMBOL = {0: "♠", 1: "♥", 2: "♦", 3: "♣"}
 SEAT_NAMES = ["南 / 你", "东", "北 / 搭档", "西"]
 TEAM_NAMES = ["南北队", "东西队"]
 
-
-@dataclass(frozen=True)
-class Card:
-    raw: str
-    suit: int
-    rank: int
-    joker: Optional[str] = None
-
-    @property
-    def point(self) -> int:
-        return POINT_VALUES.get(self.rank, 0)
-
-    @property
-    def identity(self) -> str:
-        if self.joker:
-            return self.joker
-        return f"{self.suit}:{self.rank}"
+DOMAIN_TRUMP = 0
+DOMAIN_SIDE = 1
 
 
-@dataclass
-class Pattern:
-    kind: str
-    card_count: int
-    pair_count: int = 0
-    components: Optional[List["Pattern"]] = None
+# ============================================================
+# 分析适配层：校验器的扁平 issue 列表 → 渲染层需要的分组结构
+# ============================================================
 
 
-def parse_card(raw: str) -> Card:
-    if raw == "BlackJoker":
-        return Card(raw=raw, suit=4, rank=16, joker="BlackJoker")
-    if raw == "RedJoker":
-        return Card(raw=raw, suit=4, rank=17, joker="RedJoker")
-    if len(raw) < 2:
-        raise ValueError(f"Bad card string: {raw}")
-    suit = SUIT_SYMBOL_TO_ID[raw[0]]
-    rank = RANK_SYMBOL_TO_VALUE[raw[1:]]
-    return Card(raw=raw, suit=suit, rank=rank)
+def build_analysis(log: Dict[str, Any]) -> Dict[str, Any]:
+    """跑校验并整理成渲染层期望的结构。
 
+    校验器返回的是扁平的 Issue 列表（每条带 round_num / trick_num），
+    这里按局、按墩归位，并附上每局的复算结算值用于"日志 vs 复算"对照。
+    """
+    validator = LogValidator(log)
+    issues = validator.validate()
 
-def cards(raw_cards: Iterable[str]) -> List[Card]:
-    return [parse_card(c) for c in raw_cards]
+    by_round: Dict[Any, List[Dict[str, Any]]] = {}
+    by_trick: Dict[Any, Dict[Any, List[Dict[str, Any]]]] = {}
+    for issue in issues:
+        entry = issue.to_dict()
+        if issue.trick_num is not None:
+            by_trick.setdefault(issue.round_num, {}).setdefault(
+                issue.trick_num, []).append(entry)
+        else:
+            by_round.setdefault(issue.round_num, []).append(entry)
 
+    round_reports: List[Dict[str, Any]] = []
+    prev_expected_dealer: Optional[int] = None
 
-def rank_symbol(rank: int) -> str:
-    return RANK_VALUE_TO_SYMBOL.get(rank, str(rank))
+    for idx, round_data in enumerate(log.get("rounds", [])):
+        round_num = round_data.get("round_num", idx + 1)
+        trick_issue_map = by_trick.get(round_num, {})
 
+        trick_reports = []
+        for t_idx, trick in enumerate(round_data.get("tricks", [])):
+            trick_num = trick.get("trick_num", t_idx + 1)
+            trick_reports.append({
+                "trick": trick,
+                "issues": trick_issue_map.get(trick_num, []),
+            })
 
-def skip_sequence(current_rank: int) -> List[int]:
-    return [r for r in RANK_SEQUENCE if r != current_rank]
+        # 该局的问题 = 局级问题 + 所有墩级问题（供概览徽章计数）
+        own_issues = list(by_round.get(round_num, []))
+        all_round_issues = own_issues + [
+            i for lst in trick_issue_map.values() for i in lst
+        ]
 
+        recomputed = validator.round_reports.get(round_num, {})
+        expected = recomputed.get("effective", {})
 
-def domain(card: Card, trump_suit: int, current_rank: int, joker_always_trump: bool = True) -> Tuple[str, int]:
-    if card.joker:
-        return ("TRUMP", -1) if joker_always_trump else ("NONE", -1)
-    if card.rank == current_rank:
-        return ("TRUMP", -1)
-    if trump_suit >= 0 and card.suit == trump_suit:
-        return ("TRUMP", -1)
-    return ("SIDE", card.suit)
+        settlement = round_data.get("settlement") or {}
+        dealer = int(round_data.get("dealer", 0))
+        next_dealer = settlement.get("new_dealer")
+        if not isinstance(next_dealer, int) or next_dealer < 0:
+            next_dealer = dealer
 
+        round_reports.append({
+            "round": round_data,
+            "issues": all_round_issues,
+            "round_issues": own_issues,
+            "tricks": trick_reports,
+            "expected_settlement": expected,
+            "expected_next_dealer": None if settlement.get("game_over") else next_dealer,
+            "dealer_reason": describe_dealer_rotation(
+                prev_expected_dealer, dealer, round_data.get("bid_history", [])),
+        })
+        prev_expected_dealer = None if settlement.get("game_over") else next_dealer
 
-def domains_equal(a: Tuple[str, int], b: Tuple[str, int]) -> bool:
-    if a[0] != b[0]:
-        return False
-    if a[0] == "SIDE":
-        return a[1] == b[1]
-    return True
-
-
-def domain_label(dom: Tuple[str, int]) -> str:
-    if dom[0] == "TRUMP":
-        return "主牌"
-    if dom[0] == "SIDE":
-        return f"{SUIT_ID_TO_SYMBOL.get(dom[1], '?')}副"
-    return "无域"
-
-
-def sort_value(card: Card, trump_suit: int, current_rank: int, joker_always_trump: bool = True) -> int:
-    dom = domain(card, trump_suit, current_rank, joker_always_trump)
-    if card.joker:
-        if dom[0] == "NONE":
-            return -1
-        return 140 if card.joker == "BlackJoker" else 150
-    if dom[0] == "TRUMP":
-        if card.rank == current_rank and trump_suit >= 0 and card.suit == trump_suit:
-            return 130
-        if card.rank == current_rank:
-            return 120
-        seq = skip_sequence(current_rank)
-        return 100 + seq.index(card.rank) if card.rank in seq else 100
-    seq = skip_sequence(current_rank)
-    idx = seq.index(card.rank) if card.rank in seq else 0
-    return card.suit * 15 + idx
-
-
-def identify_pattern(play_cards: List[Card], current_rank: int) -> Optional[Pattern]:
-    if not play_cards:
-        return None
-    if len(play_cards) == 1:
-        return Pattern("Single", 1)
-    if len(play_cards) == 2 and play_cards[0].identity == play_cards[1].identity:
-        return Pattern("Pair", 2, 1)
-    tractor = try_tractor(play_cards, current_rank)
-    if tractor:
-        return tractor
-    if len(play_cards) >= 2:
-        return Pattern("Dump", len(play_cards), components=decompose_dump(play_cards, current_rank))
-    return None
-
-
-def try_tractor(play_cards: List[Card], current_rank: int) -> Optional[Pattern]:
-    if len(play_cards) < 4 or len(play_cards) % 2 != 0:
-        return None
-    counts: Dict[str, Tuple[Card, int]] = {}
-    for c in play_cards:
-        if c.joker:
-            return None
-        prev = counts.get(c.identity)
-        counts[c.identity] = (c, (prev[1] if prev else 0) + 1)
-    pair_ranks: List[int] = []
-    for c, count in counts.values():
-        pair_ranks.extend([c.rank] * (count // 2))
-    if len(pair_ranks) * 2 != len(play_cards) or len(pair_ranks) < 2:
-        return None
-    pair_ranks.sort(key=lambda r: RANK_SEQUENCE.index(r))
-    for a, b in zip(pair_ranks, pair_ranks[1:]):
-        if not ranks_adjacent(a, b, current_rank):
-            return None
-    return Pattern("Tractor", len(play_cards), len(pair_ranks))
-
-
-def ranks_adjacent(a: int, b: int, current_rank: int) -> bool:
-    if abs(RANK_SEQUENCE.index(a) - RANK_SEQUENCE.index(b)) == 1:
-        return True
-    seq = skip_sequence(current_rank)
-    return a in seq and b in seq and abs(seq.index(a) - seq.index(b)) == 1
-
-
-def decompose_dump(play_cards: List[Card], current_rank: int) -> List[Pattern]:
-    remaining = list(play_cards)
-    components: List[Pattern] = []
-    while len(remaining) >= 2:
-        found = False
-        for i in range(len(remaining)):
-            for j in range(i + 1, len(remaining)):
-                if remaining[i].identity == remaining[j].identity:
-                    components.append(Pattern("Pair", 2, 1))
-                    remaining.pop(j)
-                    remaining.pop(i)
-                    found = True
-                    break
-            if found:
-                break
-        if not found:
-            break
-    components.extend(Pattern("Single", 1) for _ in remaining)
-    return components
-
-
-def structure_matches(play_pattern: Optional[Pattern], lead_pattern: Optional[Pattern]) -> bool:
-    if not play_pattern or not lead_pattern:
-        return False
-    if play_pattern.kind != lead_pattern.kind:
-        return False
-    if play_pattern.kind == "Tractor":
-        return play_pattern.pair_count >= lead_pattern.pair_count
-    return True
-
-
-def play_value(play_cards: List[Card], trump_suit: int, current_rank: int) -> int:
-    return max(sort_value(c, trump_suit, current_rank) for c in play_cards)
-
-
-def determine_winner(plays: List[Dict[str, Any]], trump_suit: int, current_rank: int) -> int:
-    parsed_plays = []
-    for p in plays:
-        cs = cards(p.get("cards", []))
-        parsed_plays.append(
-            {
-                "seat": p["seat"],
-                "cards": cs,
-                "domain": domain(cs[0], trump_suit, current_rank) if cs else ("NONE", -1),
-                "pattern": identify_pattern(cs, current_rank),
-                "value": play_value(cs, trump_suit, current_rank) if cs else -1,
-            }
-        )
-    lead = parsed_plays[0]
-    lead_domain = lead["domain"]
-    lead_pattern = lead["pattern"]
-    lead_is_trump = domains_equal(lead_domain, ("TRUMP", -1))
-
-    best_seat = lead["seat"]
-    best_value = lead["value"]
-    best_is_trump_kill = False
-
-    for p in parsed_plays[1:]:
-        play_is_trump = p["domain"][0] == "TRUMP"
-        is_same_domain = domains_equal(p["domain"], lead_domain)
-        if lead_is_trump:
-            if is_same_domain and structure_matches(p["pattern"], lead_pattern) and p["value"] > best_value:
-                best_seat = p["seat"]
-                best_value = p["value"]
-        elif play_is_trump and not is_same_domain:
-            if not structure_matches(p["pattern"], lead_pattern):
-                continue
-            if not best_is_trump_kill or p["value"] > best_value:
-                best_seat = p["seat"]
-                best_value = p["value"]
-                best_is_trump_kill = True
-        elif is_same_domain and not best_is_trump_kill:
-            if structure_matches(p["pattern"], lead_pattern) and p["value"] > best_value:
-                best_seat = p["seat"]
-                best_value = p["value"]
-    return best_seat
-
-
-def count_points(raw_cards: Iterable[str]) -> int:
-    return sum(parse_card(c).point for c in raw_cards)
-
-
-def count_pairs_in_domain(raw_cards: Iterable[str], lead_domain: Tuple[str, int], trump_suit: int, current_rank: int) -> List[str]:
-    counts: Dict[str, int] = {}
-    labels: Dict[str, str] = {}
-    for c in cards(raw_cards):
-        if domains_equal(domain(c, trump_suit, current_rank), lead_domain):
-            counts[c.identity] = counts.get(c.identity, 0) + 1
-            labels[c.identity] = c.raw
-    return sorted(labels[k] for k, v in counts.items() if v >= 2)
-
-
-def bottom_multiplier(pattern: Optional[Pattern]) -> int:
-    if not pattern:
-        return 1
-    if pattern.kind == "Single":
-        return 1
-    if pattern.kind == "Pair":
-        return 2
-    if pattern.kind == "Tractor":
-        return pattern.pair_count * 2
-    if pattern.kind == "Dump":
-        return max((bottom_multiplier(c) for c in pattern.components or []), default=1)
-    return 1
-
-
-def apply_upgrade(rank: int, levels: int, no_skip_enabled: bool = True) -> int:
-    current = rank
-    for i in range(levels):
-        idx = RANK_SEQUENCE.index(current)
-        if idx >= len(RANK_SEQUENCE) - 1:
-            return 14
-        current = RANK_SEQUENCE[idx + 1]
-        if no_skip_enabled and i < levels - 1 and current in NO_SKIP_RANKS:
-            return current
-    return current
-
-
-def expected_settlement(round_data: Dict[str, Any], next_round: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    tricks = round_data.get("tricks", [])
-    settlement = round_data.get("settlement", {})
-    dealer = round_data.get("dealer", 0)
-    current_rank = round_data.get("rank", 2)
-    final_trick = tricks[-1] if tricks else {}
-    last_winner_is_attack = final_trick.get("winner_side") == "attack"
-    base_score = tricks[-1].get("attack_score_after", 0) if tricks else 0
-    bottom_cards = round_data.get("debug", {}).get("buried_cards", [])
-    bottom_score = count_points(bottom_cards) if last_winner_is_attack else 0
-    winner_play = None
-    for p in final_trick.get("plays", []):
-        if p.get("seat") == final_trick.get("winner"):
-            winner_play = p
-            break
-    winner_pattern = identify_pattern(cards(winner_play.get("cards", [])), current_rank) if winner_play else None
-    mult = bottom_multiplier(winner_pattern) if last_winner_is_attack else 0
-    final_score = base_score + bottom_score * mult
-
-    side, levels = 0, 0
-    for minimum, row_side, row_levels in DEFAULT_UPGRADE_TABLE:
-        if final_score >= minimum:
-            side, levels = row_side, row_levels
-
-    dealer_team = dealer % 2
-    attack_team = (dealer + 1) % 2
-    team_ranks = round_data.get("team_ranks") or []
-    base_rank = current_rank
-    if side == 1 and len(team_ranks) >= 2:
-        base_rank = team_ranks[attack_team]
-    new_rank = apply_upgrade(base_rank, levels) if levels > 0 else current_rank
     return {
-        "attack_base_score": base_score,
-        "bottom_score": bottom_score,
-        "bottom_multiplier": mult,
-        "bottom_bonus": bottom_score * mult,
-        "final_score": final_score,
-        "upgrading_side": side,
-        "upgrade_levels": levels,
-        "dealer_dethroned": final_score >= 80,
-        "new_dealer": (dealer + 1) % 4 if final_score >= 80 else -1,
-        "new_rank": new_rank,
-        "upgrading_team": dealer_team if side == 0 else attack_team,
-        "next_round_actual_dealer": None if not next_round else next_round.get("dealer"),
+        "rounds": round_reports,
+        "issues": [i.to_dict() for i in issues],
+        "skipped": validator.skipped_checks,
+        "config": validator.config,
+        "rules": validator.rules,
     }
 
 
-def analyze_log(log: Dict[str, Any]) -> Dict[str, Any]:
-    rounds = log.get("rounds", [])
-    all_issues: List[Dict[str, Any]] = []
-    round_reports = []
-    previous_expected_dealer: Optional[int] = None
-    previous_team_ranks: Optional[List[int]] = None
-
-    for idx, round_data in enumerate(rounds):
-        round_issues: List[Dict[str, Any]] = []
-        trick_reports = []
-        trump_suit = round_data.get("trump_suit", -1)
-        current_rank = round_data.get("rank", 2)
-        dealer = round_data.get("dealer", 0)
-        attack_team = set(round_data.get("attack_team") or [s for s in range(4) if s % 2 != dealer % 2])
-        dealer_reason = describe_dealer_rotation(previous_expected_dealer, dealer, round_data.get("bid_history", []))
-
-        if previous_expected_dealer is not None:
-            dealer_check = check_dealer_rotation(previous_expected_dealer, dealer, round_data.get("bid_history", []))
-            if dealer_check:
-                round_issues.append(dealer_check)
-
-        team_ranks = round_data.get("team_ranks") or []
-        if len(team_ranks) >= 2:
-            expected_rank = team_ranks[dealer % 2]
-            if current_rank != expected_rank:
-                round_issues.append(issue("error", "round_rank", f"本局打级 {rank_symbol(current_rank)} 与庄家队等级 {rank_symbol(expected_rank)} 不一致。"))
-
-        expected_score = 0
-        previous_winner = None
-        for t_idx, trick in enumerate(round_data.get("tricks", [])):
-            plays = trick.get("plays", [])
-            trick_issues: List[Dict[str, Any]] = []
-            if len(plays) != 4:
-                trick_issues.append(issue("error", "play_count", f"本墩出牌记录数为 {len(plays)}，期望 4。"))
-            if plays:
-                expected_lead = dealer if t_idx == 0 else previous_winner
-                if expected_lead is not None and trick.get("lead_seat") != expected_lead:
-                    trick_issues.append(issue("error", "lead_seat", f"先手 S{trick.get('lead_seat')} 与期望 S{expected_lead} 不一致。"))
-                expected_order = [(plays[0]["seat"] + i) % 4 for i in range(len(plays))]
-                actual_order = [p.get("seat") for p in plays]
-                if actual_order != expected_order:
-                    trick_issues.append(issue("error", "play_order", f"出牌顺序 {actual_order} 与期望 {expected_order} 不一致。"))
-                lead_cards = cards(plays[0].get("cards", []))
-                lead_count = len(lead_cards)
-                lead_domain = domain(lead_cards[0], trump_suit, current_rank) if lead_cards else ("NONE", -1)
-                lead_pattern = identify_pattern(lead_cards, current_rank)
-                for play in plays[1:]:
-                    raw_play = play.get("cards", [])
-                    if len(raw_play) != lead_count:
-                        trick_issues.append(issue("warning", "follow_count", f"S{play.get('seat')} 跟牌 {len(raw_play)} 张，首出 {lead_count} 张。"))
-                    hand_before = find_hand_before(trick, play.get("seat"))
-                    if hand_before:
-                        pairs = count_pairs_in_domain(hand_before, lead_domain, trump_suit, current_rank)
-                        played_cards = cards(raw_play)
-                        played_domain_cards = [c for c in played_cards if domains_equal(domain(c, trump_suit, current_rank), lead_domain)]
-                        required = min(len([c for c in cards(hand_before) if domains_equal(domain(c, trump_suit, current_rank), lead_domain)]), lead_count)
-                        if len(played_domain_cards) < required:
-                            trick_issues.append(issue("error", "follow_domain", f"S{play.get('seat')} 有 {required} 张首出域牌应跟，实际只跟 {len(played_domain_cards)} 张。"))
-                        if lead_pattern and lead_pattern.kind == "Pair" and pairs:
-                            played_pair = len(played_domain_cards) >= 2 and played_domain_cards[0].identity == played_domain_cards[1].identity
-                            if not played_pair:
-                                trick_issues.append(issue("error", "must_follow_pair", f"S{play.get('seat')} 有同域对子 {', '.join(pairs)}，但未跟对子。"))
-
-                if len(plays) == 4:
-                    calculated_winner = determine_winner(plays, trump_suit, current_rank)
-                    if calculated_winner != trick.get("winner"):
-                        trick_issues.append(issue("error", "winner", f"赢家日志为 S{trick.get('winner')}，独立复算为 S{calculated_winner}。"))
-
-                trick_points = sum(count_points(p.get("cards", [])) for p in plays)
-                if trick_points != trick.get("trick_points", trick.get("trick_score", 0)):
-                    trick_issues.append(issue("error", "trick_points", f"本墩牌点日志 {trick.get('trick_points')}，复算 {trick_points}。"))
-                attack_gain = trick_points if trick.get("winner") in attack_team else 0
-                expected_score += attack_gain
-                if expected_score != trick.get("attack_score_after", 0):
-                    trick_issues.append(issue("error", "attack_score", f"攻方累计分日志 {trick.get('attack_score_after')}，复算 {expected_score}。"))
-                previous_winner = trick.get("winner")
-
-            round_issues.extend(trick_issues)
-            trick_reports.append({"trick": trick, "issues": trick_issues})
-
-        expected = expected_settlement(round_data, rounds[idx + 1] if idx + 1 < len(rounds) else None)
-        settlement = round_data.get("settlement", {})
-        if settlement:
-            for key in ["attack_base_score", "bottom_score", "bottom_multiplier", "bottom_bonus", "final_score", "upgrading_side", "upgrade_levels", "new_dealer", "new_rank"]:
-                if settlement.get(key) != expected.get(key):
-                    round_issues.append(issue("error", "settlement", f"结算字段 {key} 日志={settlement.get(key)}，复算={expected.get(key)}。"))
-
-        previous_expected_dealer = expected["new_dealer"] if expected["new_dealer"] >= 0 else dealer
-        previous_team_ranks = update_team_ranks(team_ranks, expected)
-        all_issues.extend(add_round_context(round_data.get("round_num", idx + 1), round_issues))
-        round_reports.append(
-            {
-                "round": round_data,
-                "tricks": trick_reports,
-                "issues": round_issues,
-                "expected_settlement": expected,
-                "expected_next_dealer": previous_expected_dealer,
-                "expected_team_ranks_after": previous_team_ranks,
-                "dealer_reason": dealer_reason,
-            }
-        )
-
-    return {"rounds": round_reports, "issues": all_issues}
+# ============================================================
+# 展示用的牌面排序（非规则判定，只影响手牌的显示顺序）
+# ============================================================
 
 
-def issue(level: str, code: str, message: str) -> Dict[str, Any]:
-    return {"level": level, "code": code, "message": message}
+def sort_raw_cards_for_display(
+    raw_cards: List[str], rules: Rules, trump_suit: int, current_rank: int
+) -> List[str]:
+    try:
+        parsed = parse_cards(raw_cards)
+    except LogFormatError:
+        return list(raw_cards)
+    parsed.sort(key=lambda c: (
+        card_display_group(c, rules, trump_suit, current_rank),
+        -rules.sort_value(c, trump_suit, current_rank),
+        card_identity_key(c),
+    ))
+    return [c.raw for c in parsed]
 
 
-def add_round_context(round_num: int, issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return [dict(i, round_num=round_num) for i in issues]
+def card_display_group(
+    card: Card, rules: Rules, trump_suit: int, current_rank: int
+) -> int:
+    """主牌排最前，副牌按 ♣♥♠♦ 分组——纯展示分组，与规则无关。"""
+    if rules.suit_domain(card, trump_suit, current_rank)[0] == DOMAIN_TRUMP:
+        return 0
+    return {3: 1, 1: 2, 0: 3, 2: 4}.get(card.suit, 5)
+
+
+def card_identity_key(card: Card) -> str:
+    if card.is_joker:
+        return f"joker:{card.joker_type}"
+    return f"{card.suit}:{card.rank:02d}"
+
+
+# ============================================================
+# 手牌快照重建
+# ============================================================
+
+
+def remove_cards(source: List[str], removed: Iterable[str]) -> List[str]:
+    result = list(source)
+    for card in removed:
+        try:
+            result.remove(card)
+        except ValueError:
+            pass
+    return result
+
+
+def hand_snapshots(hands: List[List[str]]) -> List[Dict[str, Any]]:
+    return [
+        {"seat": seat, "cards": list(hand), "count": len(hand)}
+        for seat, hand in enumerate(hands)
+    ]
+
+
+def reconstruct_hand_snapshots(log: Dict[str, Any]) -> None:
+    """给每墩补上 _hands_before / _hands_after，供页面展示手牌变化。
+
+    优先用 debug.hands_at_play_start（引擎在进入出牌阶段时直接快照）。
+    退化路径 initial_hands - 埋底在**反抢局下不可靠**：庄家先埋一次、
+    反家再埋一次，log_bury 第二次会覆盖第一次，原庄家埋了什么无从得知。
+    数据不足时跳过该局而不是抛异常——可视化不该因为缺可选字段就整个失败。
+    """
+    for round_data in log.get("rounds", []):
+        tricks = round_data.get("tricks", [])
+        if not tricks:
+            continue
+
+        debug = round_data.get("debug") or {}
+        snapshot = debug.get("hands_at_play_start")
+        if isinstance(snapshot, list) and len(snapshot) == 4 and all(snapshot):
+            hands = [list(h) for h in snapshot]
+        else:
+            initial = debug.get("initial_hands")
+            if not isinstance(initial, list) or len(initial) != 4:
+                continue
+            hands = [list(h) for h in initial]
+            merged = debug.get("hand_with_bottom")
+            buried = round_data.get("buried_cards") or debug.get("buried_cards")
+            bid = round_data.get("bid")
+            bury_seat = int(bid["seat"]) if isinstance(bid, dict) and "seat" in bid \
+                else int(round_data.get("dealer", 0))
+            if isinstance(merged, list) and merged and isinstance(buried, list):
+                hands[bury_seat] = remove_cards(list(merged), buried)
+
+        for trick in tricks:
+            trick["_hands_before"] = hand_snapshots(hands)
+            for play in trick.get("plays", []):
+                seat = int(play.get("seat", 0))
+                hands[seat] = remove_cards(hands[seat], play.get("cards", []))
+            trick["_hands_after"] = hand_snapshots(hands)
+
+
+def find_hand_before(trick: Dict[str, Any], seat: int) -> List[str]:
+    for hand in trick.get("_hands_before", []):
+        if hand.get("seat") == seat:
+            return hand.get("cards", [])
+    return []
+
+
+def find_hand_after(trick: Dict[str, Any], seat: int) -> List[str]:
+    for hand in trick.get("_hands_after", []):
+        if hand.get("seat") == seat:
+            return hand.get("cards", [])
+    return []
+
+
+def normalize_html_output(content: str) -> str:
+    return "\n".join(line.rstrip() for line in content.splitlines()) + "\n"
 
 
 def normalize_bid_history(raw_history: Any) -> List[Dict[str, Any]]:
@@ -472,45 +237,6 @@ def normalize_bid_history(raw_history: Any) -> List[Dict[str, Any]]:
     if isinstance(raw_history, dict):
         return [raw_history]
     return []
-
-
-def check_dealer_rotation(expected_dealer: int, actual_dealer: int, raw_bid_history: Any) -> Optional[Dict[str, Any]]:
-    if actual_dealer == expected_dealer:
-        return None
-
-    bid_history = normalize_bid_history(raw_bid_history)
-    first_bid = next((b for b in bid_history if b.get("action") == "bid"), None)
-    if not first_bid:
-        return issue(
-            "error",
-            "dealer_rotation",
-            f"本局庄家 S{actual_dealer} 与上局结算期望 S{expected_dealer} 不一致，且没有亮主成功记录。",
-        )
-
-    if first_bid.get("seat") != actual_dealer:
-        return issue(
-            "error",
-            "dealer_rotation",
-            f"本局庄家 S{actual_dealer} 与首个亮主座位 S{first_bid.get('seat')} 不一致。",
-        )
-
-    seats_before_actual = []
-    seat = expected_dealer
-    while seat != actual_dealer:
-        seats_before_actual.append(seat)
-        seat = (seat + 1) % 4
-        if len(seats_before_actual) > 4:
-            break
-
-    for seat in seats_before_actual:
-        skip = next((b for b in bid_history if b.get("seat") == seat and b.get("action") == "skip"), None)
-        if not skip:
-            return issue(
-                "error",
-                "dealer_rotation",
-                f"本局庄家从期望 S{expected_dealer} 顺延到 S{actual_dealer}，但 S{seat} 没有跳过记录。",
-            )
-    return None
 
 
 def format_skip_reason(reason: Any) -> str:
@@ -565,77 +291,6 @@ def describe_dealer_rotation(expected_dealer: Optional[int], actual_dealer: int,
     return "；".join(parts) + "。"
 
 
-def find_hand_before(trick: Dict[str, Any], seat: int) -> List[str]:
-    for hand in trick.get("_hands_before", []):
-        if hand.get("seat") == seat:
-            return hand.get("cards", [])
-    return []
-
-
-def find_hand_after(trick: Dict[str, Any], seat: int) -> List[str]:
-    for hand in trick.get("_hands_after", []):
-        if hand.get("seat") == seat:
-            return hand.get("cards", [])
-    return []
-
-
-def remove_cards(source: List[str], removed: Iterable[str]) -> List[str]:
-    result = list(source)
-    for card in removed:
-        try:
-            result.remove(card)
-        except ValueError:
-            pass
-    return result
-
-
-def reconstruct_hand_snapshots(log: Dict[str, Any]) -> None:
-    for round_data in log.get("rounds", []):
-        tricks = round_data.get("tricks", [])
-        if not tricks:
-            continue
-
-        debug = round_data.get("debug", {})
-        initial_hands = debug.get("initial_hands", [])
-        if len(initial_hands) != 4:
-            raise ValueError(f"Round {round_data.get('round_num')} missing debug.initial_hands")
-
-        hands = [list(hand) for hand in initial_hands]
-        dealer = int(round_data.get("dealer", 0))
-        hand_with_bottom = debug.get("hand_with_bottom", [])
-        buried_cards = debug.get("buried_cards", [])
-        if not hand_with_bottom:
-            raise ValueError(f"Round {round_data.get('round_num')} missing debug.hand_with_bottom")
-        hands[dealer] = remove_cards(list(hand_with_bottom), buried_cards)
-
-        for trick in tricks:
-            trick["_hands_before"] = hand_snapshots(hands)
-            for play in trick.get("plays", []):
-                seat = int(play.get("seat", 0))
-                hands[seat] = remove_cards(hands[seat], play.get("cards", []))
-            trick["_hands_after"] = hand_snapshots(hands)
-
-
-def hand_snapshots(hands: List[List[str]]) -> List[Dict[str, Any]]:
-    return [
-        {"seat": seat, "cards": list(hand), "count": len(hand)}
-        for seat, hand in enumerate(hands)
-    ]
-
-
-def normalize_html_output(content: str) -> str:
-    return "\n".join(line.rstrip() for line in content.splitlines()) + "\n"
-
-
-def update_team_ranks(team_ranks: List[int], expected: Dict[str, Any]) -> Optional[List[int]]:
-    if len(team_ranks) < 2:
-        return None
-    result = list(team_ranks)
-    if expected["upgrade_levels"] > 0:
-        result[expected["upgrading_team"]] = expected["new_rank"]
-    return result
-
-
 def render_html(log: Dict[str, Any], analysis: Dict[str, Any], source_path: Path) -> str:
     title = f"双升日志复盘 - {source_path.name}"
     nav = []
@@ -646,7 +301,7 @@ def render_html(log: Dict[str, Any], analysis: Dict[str, Any], source_path: Path
         warnings = sum(1 for i in report["issues"] if i["level"] == "warning")
         badge = f"{errors} 错 / {warnings} 警"
         nav.append(f'<button class="round-tab" data-target="round-{idx}">第 {esc(r.get("round_num", idx + 1))} 局 <span>{esc(badge)}</span></button>')
-        sections.append(render_round(report, idx))
+        sections.append(render_round(report, idx, analysis["rules"]))
 
     corrections_seed = {"source": str(source_path), "created_from": log.get("created_at"), "corrections": {}}
     return f"""<!doctype html>
@@ -680,17 +335,17 @@ def render_html(log: Dict[str, Any], analysis: Dict[str, Any], source_path: Path
 """
 
 
-def render_round(report: Dict[str, Any], idx: int) -> str:
+def render_round(report: Dict[str, Any], idx: int, rules: Rules) -> str:
     r = report["round"]
     settlement = r.get("settlement", {})
     expected = report["expected_settlement"]
     issues_html = render_issues(report["issues"])
-    tricks = "".join(render_trick(t_report, r, idx) for t_report in report["tricks"])
+    tricks = "".join(render_trick(t_report, r, idx, rules) for t_report in report["tricks"])
     team_ranks = r.get("team_ranks_symbols") or [rank_symbol(v) for v in r.get("team_ranks", [])]
     bid_history = ", ".join(render_bid(b) for b in r.get("bid_history", [])) or "无"
     bottom = " ".join(r.get("debug", {}).get("bottom_cards", [])) or "无"
     buried = " ".join(r.get("debug", {}).get("buried_cards", [])) or "无"
-    initial_hands = render_initial_hands(r)
+    initial_hands = render_initial_hands(r, rules)
     correction_key = f"round-{r.get('round_num', idx + 1)}"
     return f"""
 <section id="round-{idx}" class="round-section">
@@ -738,7 +393,7 @@ def render_round(report: Dict[str, Any], idx: int) -> str:
 """
 
 
-def render_initial_hands(round_data: Dict[str, Any]) -> str:
+def render_initial_hands(round_data: Dict[str, Any], rules: Rules) -> str:
     hands = round_data.get("debug", {}).get("initial_hands", [])
     if not hands:
         return ""
@@ -746,7 +401,7 @@ def render_initial_hands(round_data: Dict[str, Any]) -> str:
     current_rank = round_data.get("rank", 2)
     rows = []
     for seat, raw_hand in enumerate(hands):
-        display_hand = sort_raw_cards_for_display(raw_hand, trump_suit, current_rank)
+        display_hand = sort_raw_cards_for_display(raw_hand, rules, trump_suit, current_rank)
         rows.append(
             f"""
 <details class="initial-hand">
@@ -763,7 +418,7 @@ def render_initial_hands(round_data: Dict[str, Any]) -> str:
 """
 
 
-def render_trick(t_report: Dict[str, Any], round_data: Dict[str, Any], round_idx: int) -> str:
+def render_trick(t_report: Dict[str, Any], round_data: Dict[str, Any], round_idx: int, rules: Rules) -> str:
     t = t_report["trick"]
     issues = t_report["issues"]
     plays = {p.get("seat"): p for p in t.get("plays", [])}
@@ -776,7 +431,7 @@ def render_trick(t_report: Dict[str, Any], round_data: Dict[str, Any], round_idx
         play = plays.get(seat, {})
         seat_blocks.append(render_seat_play(seat, play, pos, winner, lead))
     issue_html = render_issues(issues, compact=True)
-    hand_html = render_hand_snapshots(t, round_data)
+    hand_html = render_hand_snapshots(t, round_data, rules)
     return f"""
 <details class="trick-card" open>
   <summary class="{title_class}">
@@ -803,13 +458,13 @@ def render_trick(t_report: Dict[str, Any], round_data: Dict[str, Any], round_idx
 """
 
 
-def render_hand_snapshots(trick: Dict[str, Any], round_data: Dict[str, Any]) -> str:
+def render_hand_snapshots(trick: Dict[str, Any], round_data: Dict[str, Any], rules: Rules) -> str:
     trump_suit = round_data.get("trump_suit", -1)
     current_rank = round_data.get("rank", 2)
     rows = []
     for seat in range(4):
-        before = sort_raw_cards_for_display(find_hand_before(trick, seat), trump_suit, current_rank)
-        after = sort_raw_cards_for_display(find_hand_after(trick, seat), trump_suit, current_rank)
+        before = sort_raw_cards_for_display(find_hand_before(trick, seat), rules, trump_suit, current_rank)
+        after = sort_raw_cards_for_display(find_hand_after(trick, seat), rules, trump_suit, current_rank)
         play = next((p for p in trick.get("plays", []) if p.get("seat") == seat), {})
         played = play.get("cards", [])
         if not before and not after:
@@ -834,36 +489,6 @@ def render_hand_snapshots(trick: Dict[str, Any], round_data: Dict[str, Any]) -> 
     if not rows:
         return ""
     return f'<div class="hand-snapshots"><h3>本墩前后手牌</h3>{"".join(rows)}</div>'
-
-
-def sort_raw_cards_for_display(raw_cards: List[str], trump_suit: int, current_rank: int) -> List[str]:
-    parsed = cards(raw_cards)
-    parsed.sort(key=lambda c: (
-        card_display_group(c, trump_suit, current_rank),
-        -sort_value(c, trump_suit, current_rank),
-        card_identity_key(c),
-    ))
-    return [c.raw for c in parsed]
-
-
-def card_display_group(card: Card, trump_suit: int, current_rank: int) -> int:
-    if domain(card, trump_suit, current_rank)[0] == "TRUMP":
-        return 0
-    if card.suit == 3:
-        return 1
-    if card.suit == 1:
-        return 2
-    if card.suit == 0:
-        return 3
-    if card.suit == 2:
-        return 4
-    return 5
-
-
-def card_identity_key(card: Card) -> str:
-    if card.joker:
-        return card.joker
-    return f"{card.suit}:{card.rank:02d}"
 
 
 def render_seat_play(seat: int, play: Dict[str, Any], pos: str, winner: int, lead: int) -> str:
@@ -1078,24 +703,49 @@ document.getElementById('export-corrections').addEventListener('click', () => {
 """
 
 
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Export a Shengji game log to HTML replay.")
-    parser.add_argument("log_file", help="Path to game_log_*.json")
-    parser.add_argument("-o", "--output", help="Output HTML path. Defaults next to the log file.")
+    force_utf8_stdout()
+
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("log", type=Path, help="对局日志 JSON")
+    parser.add_argument("-o", "--output", type=Path, default=None,
+                        help="输出 HTML 路径（默认与日志同名）")
     args = parser.parse_args()
 
-    log_path = Path(args.log_file)
-    with log_path.open("r", encoding="utf-8") as f:
-        log = json.load(f)
+    log_path = args.log
+    if not log_path.is_file():
+        alt = Path(__file__).resolve().parents[1] / log_path
+        if alt.is_file():
+            log_path = alt
+        else:
+            raise SystemExit(f"日志不存在: {args.log}")
+
+    log = json.loads(log_path.read_text(encoding="utf-8"))
+
+    try:
+        analysis = build_analysis(log)
+    except LogFormatError as exc:
+        raise SystemExit(
+            f"无法分析该日志: {exc}\n"
+            f"提示：2026-07-28 之前生成的日志缺少 upgrade_table 等字段，请重新生成。"
+        )
+
     reconstruct_hand_snapshots(log)
-    analysis = analyze_log(log)
-    output = Path(args.output) if args.output else log_path.with_suffix(".html")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(normalize_html_output(render_html(log, analysis, log_path)), encoding="utf-8")
+
+    out_path = args.output or log_path.with_suffix(".html")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        normalize_html_output(render_html(log, analysis, log_path)), encoding="utf-8")
+
     errors = sum(1 for i in analysis["issues"] if i["level"] == "error")
     warnings = sum(1 for i in analysis["issues"] if i["level"] == "warning")
-    print(f"HTML replay written: {output}")
-    print(f"Analysis issues: {errors} errors, {warnings} warnings")
+    print(f"HTML 复盘已生成: {out_path}")
+    print(f"规则校验: {errors} error / {warnings} warning")
+    for skipped in analysis["skipped"]:
+        print(f"  [跳过] {skipped}")
 
 
 if __name__ == "__main__":

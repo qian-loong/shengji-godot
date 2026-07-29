@@ -45,23 +45,17 @@ static func bid_type_name(bid_type: int) -> String:
 # Game-level logging
 # ============================================================
 
+## 记录规则配置。使用 RuleConfig.to_dict() 的完整序列化而非手写字段子集，
+## 否则新增规则字段（如 upgrade_table）不会进日志，下游校验工具只能硬编码
+## 规则常量，随配置系统演进必然漂移。
 func set_rule_config(rc: RuleConfig) -> void:
-	_game_log["rule_config"] = {
-		"deck_count": rc.deck_count,
-		"current_rank": rc.current_rank,
-		"trump_mode": rc.trump_mode,
-		"joker_always_trump": rc.joker_always_trump,
-		"trump_joker_color_match": rc.trump_joker_color_match,
-		"bid_requires_joker": rc.bid_requires_joker,
-		"allow_dump": rc.allow_dump,
-		"strict_follow_structure": rc.strict_follow_structure,
-		"four_same_is_tractor": rc.four_same_is_tractor,
-		"tractor_allow_rank_card": rc.tractor_allow_rank_card,
-		"upgrade_threshold": rc.upgrade_threshold,
-		"upgrade_step": rc.upgrade_step,
-		"no_skip_enabled": rc.no_skip_enabled,
-		"no_skip_ranks": rc.no_skip_ranks.duplicate(),
-	}
+	var data := rc.to_dict()
+	# 补派生只读值：日志复算需要它们（如总分守恒检查），
+	# 下游不应自行重推 deck_count → total_score 之类的公式。
+	data["total_score"] = rc.total_score
+	data["hand_size"] = rc.hand_size
+	data["bottom_size"] = rc.bottom_size
+	_game_log["rule_config"] = data
 
 
 # ============================================================
@@ -80,6 +74,7 @@ func begin_round(round_num: int, rank: int, dealer: int, seed_value: int, p_team
 		"trump_suit": -1,
 		"trump_suit_symbol": "",
 		"buried_indices": [],
+		"buried_cards": [],
 		"tricks": [],
 		"settlement": {},
 	}
@@ -95,6 +90,7 @@ func begin_round(round_num: int, rank: int, dealer: int, seed_value: int, p_team
 			"hand_with_bottom": [],
 			"buried_cards": [],
 			"bottom_cards": [],
+			"hands_at_play_start": [],
 		}
 
 
@@ -174,6 +170,9 @@ func log_trump_determined(trump_suit: int) -> void:
 
 func log_bury(merged_hand: Array, selected_indices: Array[int], buried_cards: Array, remaining_hand: Array) -> void:
 	_current_round["buried_indices"] = selected_indices.duplicate()
+	# 底牌是结算复算的必需输入（扣底分 × 末墩倍数），因此常规记录，
+	# 不随 debug 开关消失；debug 块保留同名副本以兼容既有消费者。
+	_current_round["buried_cards"] = _cards_to_strs(buried_cards)
 	if _debug_enabled:
 		_current_round["debug"]["hand_with_bottom"] = _cards_to_strs(merged_hand)
 		_current_round["debug"]["buried_cards"] = _cards_to_strs(buried_cards)
@@ -232,6 +231,41 @@ func begin_trick(trick_num: int, lead_seat: int, attack_score: int) -> void:
 			"domain_info": [],
 			"winner_reason": "",
 		}
+
+
+## 记录出牌开始时的四人手牌。
+##
+## 这是复盘与跟牌合法性校验的唯一可靠输入：反抢局里庄家先埋一次、
+## 反家再埋一次，log_bury 的第二次调用会覆盖第一次，
+## 因此 initial_hands + buried_cards 推不出原庄家配底后的真实手牌。
+func log_hands_at_play_start(hands: Array) -> void:
+	if not _debug_enabled:
+		return
+	var snapshot: Array = []
+	for h: Array in hands:
+		snapshot.append(_cards_to_strs(h))
+	_current_round["debug"]["hands_at_play_start"] = snapshot
+
+
+## 记录甩牌失败（GDD card-types.md §2.3）。
+##
+## 玩家试图甩牌，但某个组成部分不是该花色域最大，被降级为只出最小的一张单牌。
+## 记录"想甩什么"与"实际出了什么"，便于复盘与校验器交叉验证。
+##
+## trick_no 由会话层传入：本方法在 submit_play 期间调用，
+## 而 _current_trick 要等四家出完、game_round.play_trick 里才建立。
+func log_dump_failed(
+	seat: int, attempted: Array, played: Card, reason: String, trick_no: int = -1
+) -> void:
+	if not _current_round.has("dump_failures"):
+		_current_round["dump_failures"] = []
+	_current_round["dump_failures"].append({
+		"seat": seat,
+		"trick_num": trick_no,
+		"attempted": _cards_to_strs(attempted),
+		"played": played.to_string_repr(),
+		"reason": reason,
+	})
 
 
 func log_hands_before_trick(_hands: Array, _trump_suit: int, _current_rank: int, _jat: bool) -> void:

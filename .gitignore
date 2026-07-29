@@ -29,6 +29,11 @@ Desktop.ini
 CLAUDE.local.md
 AGENTS.local.md
 production/session-logs/
+# 会话检查点，随时被覆盖（见 .claude/docs/directory-structure.md）
+production/session-state/*
+!production/session-state/.gitkeep
+# 调试探针与临时产物
+.tmp-probe/
 .git-commit-msg.txt
 
 # === Internal Planning (not for public) ===

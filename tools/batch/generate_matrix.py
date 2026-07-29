@@ -19,6 +19,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 
+sys.path.insert(0, str(REPO / "tools"))
+from validate_game_log import force_utf8_stdout  # noqa: E402
+
 # Mirrors src/godot/scripts/core/rule_config.gd preset factories
 PRESETS: dict[str, dict] = {
     "classic": {
@@ -115,6 +118,32 @@ PRESETS: dict[str, dict] = {
 PRESET_SOURCE = {"classic": 0, "competitive": 1, "quick": 2}
 
 
+def attack_threshold(table: list) -> int:
+    """升级表里的"攻方翻盘线"——首个 side==1 的档位。"""
+    tiers = [int(r[0]) for r in table if len(r) >= 2 and int(r[1]) == 1]
+    return min(tiers) if tiers else -1
+
+
+def check_threshold_consistency(case_id: str, cfg: dict) -> None:
+    """upgrade_threshold 必须与 upgrade_table 自洽。
+
+    两者描述同一件事的两面：表里首个 side==1 的档位就是攻方翻盘线，
+    而 upgrade_threshold 决定 dealer_dethroned。只改其一会造出矛盾配置——
+    例如门槛 100 配 80 档表时，攻方拿 86 分会被表判"攻方赢"、被门槛判"没下庄"。
+
+    与 RuleConfig.validate() 的同名检查对应，在生成阶段就拦住，
+    免得跑完一整轮批跑才发现配置是废的。
+    """
+    threshold = int(cfg.get("upgrade_threshold", -1))
+    tier = attack_threshold(cfg.get("upgrade_table") or [])
+    if tier >= 0 and threshold != tier:
+        raise SystemExit(
+            f"[{case_id}] upgrade_threshold={threshold} 与升级表的攻方首档 {tier} 不一致。\n"
+            f"  改门槛时必须同时给出配套的 upgrade_table（庄家中档=门槛/2，"
+            f"攻方档距=门槛/2）。"
+        )
+
+
 def apply_overrides(base: dict, overrides: dict) -> dict:
     cfg = deepcopy(base)
     modified: list[str] = []
@@ -133,6 +162,8 @@ def apply_overrides(base: dict, overrides: dict) -> dict:
 
 
 def main() -> int:
+    force_utf8_stdout()
+
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("matrix", type=Path, help="Matrix JSON path")
     ap.add_argument(
@@ -174,6 +205,7 @@ def main() -> int:
     for factor in matrix.get("factors", []):
         case_id = factor["id"]
         cfg = apply_overrides(base, factor.get("overrides") or {})
+        check_threshold_consistency(case_id, cfg)
         cfg_path = out_dir / f"{case_id}.json"
         cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         cases.append(
