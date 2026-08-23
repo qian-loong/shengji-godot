@@ -183,3 +183,6 @@ $RECYCLE.BIN/
 *.msp
 *.lnk
 bash.exe.stackdump
+
+# 模拟器导出脚本的临时备份
+src/godot/project.godot.bak-emulator-export

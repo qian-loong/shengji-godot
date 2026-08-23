@@ -86,9 +86,10 @@ func test_finish_round_uses_attack_team_own_rank() -> void:
 
 
 ## P0/P1/P2 综合回归：攻方不受必打级约束，正常升级。
-func test_finish_round_attack_upgrade_no_constraint() -> void:
-	# 南北队 at 10 从未打过 10 庄；东家 dealer 打 3 级，攻方 130 分 → 提案升 1 到 J。
-	# 攻方不受必打级约束，正常升级到 J。
+func test_finish_round_attack_stopped_at_unplayed_no_skip() -> void:
+	# 南北队 at 10 从未打过 10 庄；东家 dealer 打 3 级，攻方 130 分 → 提案升 1 到 J，
+	# 但 10 是必打级且攻方没坐庄打过 → 钳制回 10。
+	# 本用例的重点是四层（state / effective / proposal / 日志）取值一致。
 	controller.state.team_ranks = [R.TEN, R.THREE]
 	controller.state.current_dealer = 1
 	controller.start_round(88888)
@@ -99,20 +100,20 @@ func test_finish_round_attack_upgrade_no_constraint() -> void:
 	assert_true(result["ok"])
 	# P0：finish["settlement"].new_rank 必须与 state.team_ranks 一致。
 	var effective: EffectiveSettlement = result["settlement"]
-	assert_eq(effective.new_rank, R.JACK, "P0: settlement reflects attack upgrade")
-	assert_eq(effective.upgrade_levels, 1, "P0: attack upgrade 1 level")
+	assert_eq(effective.new_rank, R.TEN, "P0: 攻方被钳制在必打级 10")
+	assert_eq(effective.upgrade_levels, 1, "P0: 提案级数仍是 1（钳制体现在 new_rank）")
 	# 提案值与 effective 一致。
-	assert_eq(effective.proposal.new_rank, R.JACK)
+	assert_eq(effective.proposal.new_rank, R.TEN)
 	assert_eq(effective.proposal.upgrade_levels, 1)
 	# state 与 effective 严格一致。
-	assert_eq(controller.state.team_ranks[0], R.JACK)
-	assert_eq(controller.state.team_ranks, [R.JACK, R.THREE] as Array[int])
-	# P2：日志里也是升级后的真实值。
+	assert_eq(controller.state.team_ranks[0], R.TEN)
+	assert_eq(controller.state.team_ranks, [R.TEN, R.THREE] as Array[int])
+	# P2：日志里也是钳制后的真实值。
 	var round_log: Dictionary = logger.get_log()["rounds"][0]
 	var settlement_log: Dictionary = round_log["settlement"]
-	assert_eq(settlement_log["new_rank"], R.JACK, "P2: log records effective new_rank")
-	assert_eq(settlement_log["effective"]["new_rank"], R.JACK)
-	assert_eq(settlement_log["proposed"]["new_rank"], R.JACK,
+	assert_eq(settlement_log["new_rank"], R.TEN, "P2: log records effective new_rank")
+	assert_eq(settlement_log["effective"]["new_rank"], R.TEN)
+	assert_eq(settlement_log["proposed"]["new_rank"], R.TEN,
 		"log preserves proposal for replay")
 
 

@@ -5,6 +5,7 @@ extends Control
 
 const DebugConfig = preload("res://scripts/core/debug_config.gd")
 const ConfigStore = preload("res://scripts/core/config_store.gd")
+const LogPaths = preload("res://scripts/core/log_paths.gd")
 
 const SEAT_NAMES: Array[String] = ["你(南)", "AI-东", "搭档(北)", "AI-西"]
 const TABLE_BG_COLOR := Color(0.05, 0.13, 0.09)
@@ -208,7 +209,9 @@ func _handle_back_request() -> void:
 
 
 func _return_to_main_menu() -> void:
-	get_tree().change_scene_to_file("res://scenes/main/main_menu.tscn")
+	# 返回预设选择页而非最顶层主菜单：玩完一局最可能的动作是换个模式再来，
+	# 且进入路径是 主菜单→预设页→游戏，返回应回到上一层。
+	get_tree().change_scene_to_file("res://scenes/main/preset_selector.tscn")
 
 
 # ============================================================
@@ -1470,15 +1473,112 @@ func _ai_play(seat: int) -> void:
 	var hand: Array = turn["hand"]
 	var cards := AIPlayer.decide_play(seat, hand, turn["lead_info"], turn["game_state"], rule_config)
 	var result := session_controller.submit_play(seat, cards)
+
+	# 引擎拒绝时**绝不能**继续往下走。此前这里不看 ok，失败了照样把 AI"想出"的牌
+	# 画到桌上、再排下一个玩家，于是界面出现了牌、手牌数却没变，轮次也推不动，
+	# 整局静默卡死（真机 2026-07-31）。宁可兜底出一手合法牌，也不要状态发散。
+	if not result.get("ok", false):
+		var reason := str(result.get("error", "unknown"))
+		push_error("AI(seat %d) 出牌被拒: %s — 牌: %s" % [seat, reason, _cards_str(cards)])
+		_log("[color=red]⚠ %s 出牌不合法(%s)，改用兜底牌[/color]" % [SEAT_NAMES[seat], reason])
+
+		var fallback := _find_legal_play(seat, hand, turn)
+		if fallback.is_empty():
+			_set_message("AI 出牌异常(%s)，对局已暂停" % reason)
+			_log("[color=red]✗ 找不到合法出牌，停在本墩以免状态发散[/color]")
+			return
+		result = session_controller.submit_play(seat, fallback)
+		if not result.get("ok", false):
+			_set_message("AI 出牌异常(%s)，对局已暂停" % str(result.get("error", "")))
+			return
+		cards = fallback
+
 	_sync_trick_host_from_controller()
-	_show_played_cards(seat, cards)
+	# AI 甩牌也可能被引擎降级，渲染同样以实际打出的为准
+	var played: Array = result.get("played_cards", cards)
+	_show_played_cards(seat, played)
 	_update_seat_counts()
-	_log("  %s 出: %s" % [SEAT_NAMES[seat], _cards_str(cards)])
+	_log("  %s 出: %s" % [SEAT_NAMES[seat], _cards_str(played)])
 
 	if result.get("trick_complete", false):
 		get_tree().create_timer(0.6).timeout.connect(_resolve_trick)
 		return
 	get_tree().create_timer(0.3).timeout.connect(_process_next_player)
+
+
+## AI 选牌被引擎拒绝时的兜底：枚举同域组合，挑第一手能过校验的。
+##
+## 只在 AI 有 bug 时才会走到，正常路径一次都不该触发——所以这里不追求打得好，
+## 只求合法、让对局能继续，同时上面已经 push_error 把问题记下来。
+func _find_legal_play(seat: int, hand: Array, turn: Dictionary) -> Array:
+	var lead_info: Dictionary = turn["lead_info"]
+	if lead_info.is_empty():
+		# 首出：单张永远合法
+		return [hand[0]] if not hand.is_empty() else []
+
+	var lead_count: int = int(lead_info.get("count", 1))
+	if hand.size() < lead_count:
+		return []
+
+	var state: Dictionary = turn["game_state"]
+	var trump_suit: int = state.get("trump_suit", -1)
+	var rank: int = state.get("current_rank", Card.Rank.TWO)
+	var lead_pattern: CardPattern.PatternResult = lead_info.get("pattern")
+
+	# 同域牌优先——引擎要求"有就必须出"，从它们里找命中率最高
+	var domain: Array = []
+	var others: Array = []
+	for c: Card in hand:
+		var dom := TrumpJudge.get_suit_domain(
+			c, trump_suit, rank, rule_config.joker_always_trump)
+		if _domain_equals(dom, lead_info["domain"]):
+			domain.append(c)
+		else:
+			others.append(c)
+
+	var pool: Array = domain + others
+	# 组合数随 lead_count 爆炸，2~3 张是绝大多数情况；再多就只试前缀组合
+	var combos := _combinations(pool, lead_count, 400)
+	for combo: Array in combos:
+		if PlayValidator.validate_follow(
+			combo, hand, lead_count, lead_info["domain"],
+			trump_suit, rank, rule_config, lead_pattern):
+			return combo
+	return []
+
+
+## 从 pool 中取 size 张的组合，最多产出 limit 个（按原顺序，小牌优先）
+func _combinations(pool: Array, size: int, limit: int) -> Array:
+	var out: Array = []
+	if size <= 0 or pool.size() < size:
+		return out
+	var idx: Array[int] = []
+	for i: int in range(size):
+		idx.append(i)
+	while true:
+		var combo: Array = []
+		for i: int in idx:
+			combo.append(pool[i])
+		out.append(combo)
+		if out.size() >= limit:
+			return out
+		var k := size - 1
+		while k >= 0 and idx[k] == pool.size() - size + k:
+			k -= 1
+		if k < 0:
+			return out
+		idx[k] += 1
+		for j: int in range(k + 1, size):
+			idx[j] = idx[j - 1] + 1
+	return out
+
+
+func _domain_equals(a: Dictionary, b: Dictionary) -> bool:
+	if a["type"] != b["type"]:
+		return false
+	if a["type"] == TrumpJudge.DomainType.SIDE:
+		return a["suit"] == b["suit"]
+	return true
 
 
 func _show_play_options(seat: int) -> void:
@@ -1527,10 +1627,21 @@ func _on_play_confirm() -> void:
 
 	waiting_for_input = false
 	_sync_trick_host_from_controller()
-	_show_played_cards(human_seat, cards)
-	_preview_human_hand_after_play(cards)
+
+	# 甩牌失败会被引擎降级为只出最小的一张单牌（GDD card-types.md §2.3）。
+	# 渲染必须用 played_cards（实际打出的），否则界面出两张、逻辑只出一张，
+	# 墩结束后"多出的牌"又回到手里，玩家会以为出了 bug。
+	var played: Array = submit.get("played_cards", cards)
+	if submit.get("dump_failed", false):
+		_set_message("甩牌失败：%s，只出最小单牌 %s" % [
+			submit.get("dump_reason", ""), _cards_str(played)])
+		_log("  甩牌失败（%s）→ 实际出: %s" % [
+			submit.get("dump_reason", ""), _cards_str(played)])
+
+	_show_played_cards(human_seat, played)
+	_preview_human_hand_after_play(played)
 	_update_seat_counts()
-	_log("  你出: %s" % _cards_str(cards))
+	_log("  你出: %s" % _cards_str(played))
 
 	_clear_actions()
 	if submit.get("trick_complete", false):
@@ -2387,11 +2498,7 @@ func _save_log() -> void:
 
 
 func _resolve_log_path(filename: String) -> String:
-	var project_root := ProjectSettings.globalize_path("res://").trim_suffix("/")
-	var repo_root := project_root.get_base_dir().get_base_dir()
-	var log_dir := "%s/logs" % repo_root
-	DirAccess.make_dir_recursive_absolute(log_dir)
-	return "%s/%s" % [log_dir, filename]
+	return LogPaths.resolve(filename)
 
 
 # ============================================================
@@ -2532,4 +2639,5 @@ func _card_identity_key(card: Card) -> String:
 
 
 func _on_return_to_menu() -> void:
-	get_tree().change_scene_to_file("res://scenes/main/main_menu.tscn")
+	# 与 _return_to_main_menu 一致：回预设选择页
+	get_tree().change_scene_to_file("res://scenes/main/preset_selector.tscn")

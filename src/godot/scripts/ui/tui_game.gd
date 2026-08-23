@@ -2,6 +2,8 @@
 ## Uses Label + buttons for card selection and gameplay
 extends Control
 
+const LogPaths = preload("res://scripts/core/log_paths.gd")
+
 const SEAT_NAMES: Array[String] = ["你(南)", "AI-东", "搭档(北)", "AI-西"]
 # 逆时针座位顺序: 南(0/下) → 东(1/右) → 北(2/上) → 西(3/左)
 const UI_LOG_MAX_LINES: int = 300
@@ -553,10 +555,20 @@ func _ai_play(seat: int) -> void:
 	var hand: Array = turn["hand"]
 	var cards := AIPlayer.decide_play(seat, hand, turn["lead_info"], turn["game_state"], rule_config)
 	var result := session_controller.submit_play(seat, cards)
+
+	# 引擎拒绝时不能继续：桌面会画出这手牌、手牌数却不变，轮次也推不动（见 gui_game 同款修复）
+	if not result.get("ok", false):
+		var reason := str(result.get("error", "unknown"))
+		push_error("AI(seat %d) 出牌被拒: %s — 牌: %s" % [seat, reason, _cards_str(cards)])
+		_log("[color=red]⚠ %s 出牌不合法(%s)，对局已暂停[/color]" % [SEAT_NAMES[seat], reason])
+		return
+
 	_sync_trick_host_from_controller()
-	table_cards[seat] = _cards_str(cards)
+	# 甩牌失败会被降级为最小单牌，渲染以实际打出的为准
+	var played: Array = result.get("played_cards", cards)
+	table_cards[seat] = _cards_str(played)
 	_update_table()
-	_log("  %s 出: %s" % [SEAT_NAMES[seat], _cards_str(cards)])
+	_log("  %s 出: %s" % [SEAT_NAMES[seat], _cards_str(played)])
 
 	if result.get("trick_complete", false):
 		_resolve_trick()
@@ -644,9 +656,13 @@ func _on_play_confirm() -> void:
 
 	waiting_for_input = false
 	_sync_trick_host_from_controller()
-	table_cards[human_seat] = _cards_str(cards)
+	var played: Array = submit.get("played_cards", cards)
+	if submit.get("dump_failed", false):
+		_log("[color=orange]甩牌失败（%s）→ 只出最小单牌 %s[/color]" % [
+			submit.get("dump_reason", ""), _cards_str(played)])
+	table_cards[human_seat] = _cards_str(played)
 	_update_table()
-	_log("  你出: %s" % _cards_str(cards))
+	_log("  你出: %s" % _cards_str(played))
 
 	selected_indices = []
 	_clear_actions()
@@ -777,11 +793,7 @@ func _save_log() -> void:
 ## 把日志写到仓库 logs/，不再写到 docs/game-logs 或 AppData
 ## 项目根 = res:// 上两级（src/godot 的父父目录）
 func _resolve_log_path(filename: String) -> String:
-	var project_root := ProjectSettings.globalize_path("res://").trim_suffix("/")
-	var repo_root := project_root.get_base_dir().get_base_dir()
-	var log_dir := "%s/logs" % repo_root
-	DirAccess.make_dir_recursive_absolute(log_dir)
-	return "%s/%s" % [log_dir, filename]
+	return LogPaths.resolve(filename)
 
 
 # ============================================================

@@ -55,12 +55,13 @@ func test_dealer_team_upgrades_when_dealer_wins() -> void:
 
 func test_attack_team_upgrades_when_attack_wins() -> void:
 	# Dealer=seat1 (team1), attack score=155 → attack upgrades 1
-	# Dealer's rank=3 (team1), attack team0 rank=5
+	# Dealer's rank=3 (team1), attack team0 rank=6
+	# 起点取非必打级的 6，本用例验证的是「攻方赢了会升级」，不掺必打级约束。
 	var pattern := CardPattern.PatternResult.new(Card.CardType.SINGLE, 1)
-	var result := UpgradeSettlement.calculate(155, [], 1, true, pattern, R.THREE, rc, R.FIVE)
-	var ranks: Array[int] = [R.FIVE, R.THREE]
+	var result := UpgradeSettlement.calculate(155, [], 1, true, pattern, R.THREE, rc, R.SIX)
+	var ranks: Array[int] = [R.SIX, R.THREE]
 	ranks = apply_settlement(ranks, 1, result)
-	assert_eq(ranks[0], R.SIX, "team0 (attack of seat1) upgrades 5→6")
+	assert_eq(ranks[0], R.SEVEN, "team0 (attack of seat1) upgrades 6→7")
 	assert_eq(ranks[1], R.THREE, "team1 (dealer) unchanged at 3")
 
 
@@ -154,12 +155,13 @@ func test_not_game_over_other_team_at_ace() -> void:
 
 
 func test_not_game_over_attack_not_at_ace() -> void:
-	# Dealer=seat1 (team1 at 5), attack=team0 at 10, score=120 → attack upgrades 1
-	# team0: 10→J, not A, no game over
+	# Dealer=seat1 (team1 at 5), attack=team0 at 9, score=120 → attack upgrades 1
+	# team0: 9→10, not A, no game over
+	# 起点取 9 而非 10：9 不是必打级，升 1 级正好落在 10 上（终点不拦，只拦跨越）。
 	var pattern := CardPattern.PatternResult.new(Card.CardType.SINGLE, 1)
-	var result := UpgradeSettlement.calculate(120, [], 1, true, pattern, R.FIVE, rc, R.TEN)
-	assert_false(result.game_over, "attack at 10, not A, no game over")
-	assert_eq(result.new_rank, R.JACK, "10+1=J")
+	var result := UpgradeSettlement.calculate(120, [], 1, true, pattern, R.FIVE, rc, R.NINE)
+	assert_false(result.game_over, "attack at 9, not A, no game over")
+	assert_eq(result.new_rank, R.TEN, "9+1=10")
 
 
 func test_game_over_attack_at_ace() -> void:

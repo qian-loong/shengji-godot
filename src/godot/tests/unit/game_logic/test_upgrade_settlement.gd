@@ -397,3 +397,116 @@ func test_quick_preset_default_step_two_on_dealer_defend():
 	assert_eq(result.upgrading_side, 0)
 	assert_eq(result.upgrade_levels, 2)
 	assert_eq(result.new_rank, 4, "2 升 2 级 → 4")
+
+
+# ========== 必打级：起点判定 ==========
+#
+# 语义：必打级必须「坐庄打过」才能升走。一队之所以还停在某一级，正是因为
+# 还没成功打过它（打过并守住就升走了）。所以「是不是庄家方」就等价于
+# 「起点打没打过」，不需要额外记录历史。
+#
+# 回归的 bug（真机报过两次）：南北队等级 5/10，一直是对方坐庄，
+# 自己作为攻方赢了就直接跨过必打级升走。
+
+const R := Card.Rank
+
+
+func _classic() -> RuleConfig:
+	return RuleConfig.from_preset(RuleConfig.ConfigSource.PRESET_CLASSIC)
+
+
+func test_apply_upgrade_stops_when_start_is_unplayed_no_skip():
+	var config := _classic()
+
+	var got := UpgradeSettlement.apply_upgrade(R.FIVE, 2, config, false)
+
+	assert_eq(got, R.FIVE, "起点 5 未打过 → 停在 5，不能升到 7")
+
+
+func test_apply_upgrade_passes_when_start_no_skip_already_played():
+	var config := _classic()
+
+	var got := UpgradeSettlement.apply_upgrade(R.FIVE, 2, config, true)
+
+	assert_eq(got, R.SEVEN, "起点 5 已打过 → 正常升到 7")
+
+
+func test_apply_upgrade_defaults_to_played_for_backward_compat():
+	var config := _classic()
+
+	# 不传第四个参数时按「已打过」处理，保持既有调用方行为不变
+	assert_eq(UpgradeSettlement.apply_upgrade(R.FIVE, 2, config), R.SEVEN)
+
+
+func test_apply_upgrade_start_check_only_applies_to_no_skip_ranks():
+	var config := _classic()
+
+	# 起点 6 不是必打级，即便没打过也照常升
+	assert_eq(UpgradeSettlement.apply_upgrade(R.SIX, 2, config, false), R.EIGHT)
+
+
+func test_apply_upgrade_start_check_respects_disabled_flag():
+	var config := _classic()
+	config.no_skip_enabled = false
+
+	assert_eq(UpgradeSettlement.apply_upgrade(R.FIVE, 2, config, false), R.SEVEN,
+		"关掉必打级后起点不再拦截")
+
+
+func test_apply_upgrade_crossing_check_still_works_for_unplayed_start():
+	var config := _classic()
+
+	# 起点 4 不是必打级 → 起点判定不触发；但路过 5 仍要停
+	assert_eq(UpgradeSettlement.apply_upgrade(R.FOUR, 3, config, false), R.FIVE)
+
+
+func test_dealer_can_eventually_climb_past_no_skip_rank():
+	# 防死锁回归：庄家方的起点恒等于本局级牌，若对庄家方也拦起点，
+	# 它守住多少次都升不出 5，游戏会永远卡住。
+	var config := _classic()
+	var rank: int = R.FOUR
+
+	# 第一次守庄：4 升 2 级，路过 5 被拦 → 停在 5
+	rank = UpgradeSettlement.apply_upgrade(rank, 2, config, true)
+	assert_eq(rank, R.FIVE, "先停在必打级 5")
+
+	# 下一局庄家方坐庄打 5 并守住 → 起点已打过，应能升走
+	rank = UpgradeSettlement.apply_upgrade(rank, 2, config, true)
+	assert_eq(rank, R.SEVEN, "打过 5 之后必须能升出去，否则死锁")
+
+
+func test_attack_stopped_at_no_skip_rank_via_calculate():
+	# 端到端走 calculate()：攻方 130 分（升 1 级），自己那级是 10
+	var config := _classic()
+	var pattern := CardPattern.PatternResult.new(Card.CardType.SINGLE, 1)
+
+	var result := UpgradeSettlement.calculate(
+		130, [], 1, true, pattern, R.THREE, config, R.TEN)
+
+	assert_eq(result.upgrading_side, 1, "攻方升级")
+	assert_eq(result.new_rank, R.TEN, "攻方停在未打过的必打级 10")
+	assert_true(result.dealer_dethroned, "但庄家照常下庄")
+
+
+func test_dealer_not_stopped_at_no_skip_rank_via_calculate():
+	# 端到端走 calculate()：庄家方在 5 坐庄守住，30 分升 2 级
+	var config := _classic()
+	var pattern := CardPattern.PatternResult.new(Card.CardType.SINGLE, 1)
+
+	var result := UpgradeSettlement.calculate(
+		30, [], 0, false, pattern, R.FIVE, config, R.THREE)
+
+	assert_eq(result.upgrading_side, 0, "庄家方升级")
+	assert_eq(result.new_rank, R.SEVEN, "庄家方刚打过 5，可以升到 7")
+
+
+func test_shared_rank_fallback_keeps_legacy_behavior():
+	# attack_rank < 0 是 shared rank mode 兜底，此时攻方起点退化成
+	# current_rank，「庄家/攻方」二分不成立，按已打过处理保持原行为。
+	var config := _classic()
+	var pattern := CardPattern.PatternResult.new(Card.CardType.SINGLE, 1)
+
+	var result := UpgradeSettlement.calculate(
+		130, [], 1, true, pattern, R.TEN, config)
+
+	assert_eq(result.new_rank, R.JACK, "兜底路径仍按旧语义 10→J")

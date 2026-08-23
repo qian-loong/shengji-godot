@@ -431,21 +431,33 @@ static func _pick_domain_follow(domain_cards: Array, lead_count: int, lead_patte
 
 	var result: Array = []
 
-	if lead_pattern != null and rc.strict_follow_structure and lead_pattern.type == Card.CardType.PAIR:
-		if not pairs.is_empty():
-			# Must play a pair — pick smallest pair (strategy: save big)
-			result.append_array(pairs[0])
-			return result
+	# 结构要求一律走引擎的 required_pair_count：对子=1、拖拉机=pair_count、
+	# 甩牌=各分量之和。此前这里只认 PAIR / TRACTOR，跟甩牌时会掉进下面的
+	# "取最小的 N 张"分支，把对子留在手里，被 validate_follow 判非法。
+	var required_pairs := 0
+	if lead_pattern != null and rc.strict_follow_structure:
+		required_pairs = PlayValidator.required_pair_count(lead_pattern)
 
-	if lead_pattern != null and rc.strict_follow_structure and lead_pattern.type == Card.CardType.TRACTOR:
-		# Must include as many pairs as possible, up to lead's pair_count
-		var needed_pairs := mini(pairs.size(), lead_pattern.pair_count)
-		for i: int in range(needed_pairs):
+	if required_pairs > 0 and not pairs.is_empty():
+		# 引擎只要求 min(手里对子数, 首出对子数) 个，多的不必贴上去
+		var needed: int = mini(pairs.size(), required_pairs)
+		for i: int in range(needed):
 			result.append_array(pairs[i])
-		# Fill remaining with singles
-		var remaining := lead_count - result.size()
-		for i: int in range(mini(remaining, singles.size())):
-			result.append(singles[i])
+
+		# 先用单张补足张数（留着大对子）
+		var si := 0
+		while result.size() < lead_count and si < singles.size():
+			result.append(singles[si])
+			si += 1
+
+		# 单张不够时再拆剩余的对子来填
+		var pi := needed
+		while result.size() < lead_count and pi < pairs.size():
+			for c: Card in pairs[pi]:
+				if result.size() < lead_count:
+					result.append(c)
+			pi += 1
+
 		if result.size() >= lead_count:
 			return result.slice(0, lead_count)
 

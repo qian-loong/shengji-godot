@@ -67,12 +67,10 @@ func _build_ui() -> void:
 	)
 	center.add_child(gui_btn)
 
-	# Custom game button (secondary)
-	var custom_btn := _make_menu_button("自定义规则", Color(0.60, 0.25, 0.10))
-	custom_btn.pressed.connect(func() -> void:
-		get_tree().change_scene_to_file("res://scenes/main/room_config.tscn")
-	)
-	center.add_child(custom_btn)
+	# 曾经这里还有个「自定义规则」按钮直通 room_config。已移除：
+	# 它不带预设 id，配置页拿不到基底，只能显示控件出厂值，点确认还会空引用崩溃。
+	# 自定义本就依附于某个预设（RuleConfig.base_preset / ConfigStore 按它匹配存档），
+	# 入口统一收到预设选择页的每张卡片上。
 
 	# TUI mode button (secondary) — hidden for release, uncomment for dev testing
 	# var tui_btn := _make_menu_button("终端模式 (TUI)", Color(0.3, 0.3, 0.35))

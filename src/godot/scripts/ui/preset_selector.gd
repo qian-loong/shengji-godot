@@ -6,8 +6,16 @@ signal preset_selected(preset: RuleConfig.ConfigSource)
 
 const RuleConfig = preload("res://scripts/core/rule_config.gd")
 const ConfigStore = preload("res://scripts/core/config_store.gd")
+const BackNavigation = preload("res://scripts/ui/back_navigation.gd")
+
+## 自定义标注统一用色（徽章、边框、被改的规则行）
+const ACCENT_CUSTOM := Color(0.95, 0.78, 0.35)
 
 # 预设卡片配置
+#
+# 只放展示用的标题/图标/配色。规则要点**不硬编码**——一律由 _describe_config()
+# 从 RuleConfig 实时生成。此前这里写死的文案已与实现漂移出 3 处错误
+# （快速写"80 分升级"实为 60、写"从 5 开始"实为 2，竞技写"不可跳过 10/K"实为 5/10/K）。
 const PRESET_CARDS := [
 	{
 		"source": RuleConfig.ConfigSource.PRESET_CLASSIC,
@@ -15,12 +23,6 @@ const PRESET_CARDS := [
 		"subtitle": "标准规则，平衡体验",
 		"icon": "📋",
 		"color": Color(0.15, 0.50, 0.25),
-		"features": [
-			"2 副牌，80 分升级",
-			"允许甩牌，严格跟牌",
-			"王须匹配花色定主",
-			"不可跳过 5/10/K"
-		]
 	},
 	{
 		"source": RuleConfig.ConfigSource.PRESET_COMPETITIVE,
@@ -28,12 +30,6 @@ const PRESET_CARDS := [
 		"subtitle": "高手对决，严格规则",
 		"icon": "🏆",
 		"color": Color(0.60, 0.25, 0.10),
-		"features": [
-			"2 副牌，100 分升级",
-			"级牌可定主",
-			"王不须匹配花色",
-			"不可跳过 10/K"
-		]
 	},
 	{
 		"source": RuleConfig.ConfigSource.PRESET_QUICK,
@@ -41,18 +37,62 @@ const PRESET_CARDS := [
 		"subtitle": "休闲速战，轻松上手",
 		"icon": "⚡",
 		"color": Color(0.25, 0.40, 0.65),
-		"features": [
-			"1 副牌，80 分升级",
-			"从 5 开始，升 2 级",
-			"禁用甩牌，宽松跟牌",
-			"可跳过所有等级"
-		]
 	}
 ]
+
+## 卡片上展示的规则要点。每项 { field, text }——field 用于判断是否被自定义。
+## 返回值随配置实时变化，改了配置文案自然跟着变。
+static func _describe_config(config: RuleConfig) -> Array:
+	var rows: Array = []
+
+	rows.append({
+		"field": "deck_count",
+		"text": "%d 副牌，%d 分升级" % [config.deck_count, config.upgrade_threshold],
+	})
+
+	var step_text := "每次升 %d 级" % config.upgrade_step
+	if config.current_rank != Card.Rank.TWO:
+		step_text = "从 %s 起，%s" % [Card.rank_symbol(config.current_rank), step_text]
+	rows.append({ "field": "upgrade_step", "text": step_text })
+
+	rows.append({
+		"field": "allow_dump",
+		"text": "%s，%s" % [
+			"允许甩牌" if config.allow_dump else "禁用甩牌",
+			"严格跟牌" if config.strict_follow_structure else "宽松跟牌",
+		],
+	})
+
+	rows.append({
+		"field": "bid_requires_joker",
+		"text": "%s，%s" % [
+			"需持王定主" if config.bid_requires_joker else "级牌可定主",
+			"王色须匹配" if config.trump_joker_color_match else "王色不限",
+		],
+	})
+
+	var skip_text := "可跳过所有等级"
+	if config.no_skip_enabled and not config.no_skip_ranks.is_empty():
+		var names := PackedStringArray()
+		for r: int in config.no_skip_ranks:
+			names.append(Card.rank_symbol(r))
+		skip_text = "不可跳过 %s" % "/".join(names)
+	rows.append({ "field": "no_skip_enabled", "text": skip_text })
+
+	return rows
 
 
 func _ready() -> void:
 	_build_ui()
+	_install_back_navigation()
+
+
+## 系统返回键 / Esc / 边缘侧滑都退回主菜单。
+## 这里的卡片是纵向静态布局，没有滚动，侧滑不会和别的手势冲突。
+func _install_back_navigation() -> void:
+	var back := BackNavigation.new()
+	back.back_requested.connect(_on_back_pressed)
+	add_child(back)
 
 
 func _build_ui() -> void:
@@ -114,46 +154,66 @@ func _build_ui() -> void:
 
 
 func _create_preset_card(data: Dictionary) -> Control:
+	# 该预设是否有已保存的自定义——决定卡片显示原版还是自定义后的规则
+	var custom_info := ConfigStore.describe_custom_for_preset(data.source)
+	var config: RuleConfig = custom_info["config"]
+	var changed_fields: PackedStringArray = custom_info["fields"]
+	var has_custom: bool = int(custom_info["count"]) > 0
+
 	var card := PanelContainer.new()
-	card.custom_minimum_size = Vector2(280, 360)
+	# 横屏 1280 逻辑宽：3 张卡 + 间距 40 + 边距 80，每张可占 386
+	card.custom_minimum_size = Vector2(380, 420)
 	card.size_flags_horizontal = SIZE_EXPAND_FILL
 	card.mouse_filter = Control.MOUSE_FILTER_PASS
 
-	# 卡片样式
+	# 卡片样式（有自定义时边框加粗并转为金色，一眼可辨）
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.12, 0.14, 0.18)
-	style.border_width_left = 2
-	style.border_width_top = 2
-	style.border_width_right = 2
-	style.border_width_bottom = 2
-	style.border_color = data.color
+	var border := 3 if has_custom else 2
+	style.border_width_left = border
+	style.border_width_top = border
+	style.border_width_right = border
+	style.border_width_bottom = border
+	style.border_color = ACCENT_CUSTOM if has_custom else data.color
 	style.corner_radius_top_left = 12
 	style.corner_radius_top_right = 12
 	style.corner_radius_bottom_left = 12
 	style.corner_radius_bottom_right = 12
 	style.content_margin_left = 20
 	style.content_margin_right = 20
-	style.content_margin_top = 20
-	style.content_margin_bottom = 20
+	style.content_margin_top = 18
+	style.content_margin_bottom = 18
 	card.add_theme_stylebox_override("panel", style)
 
 	# 卡片内容
 	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 16)
+	content.add_theme_constant_override("separation", 12)
 	card.add_child(content)
+
+	# 顶部徽章行：无自定义时占位保持三张卡对齐
+	var badge := Label.new()
+	badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	badge.add_theme_font_size_override("font_size", 15)
+	if has_custom:
+		badge.text = "✎ 已自定义 %d 项" % custom_info["count"]
+		badge.add_theme_color_override("font_color", ACCENT_CUSTOM)
+	else:
+		badge.text = " "
+		badge.add_theme_color_override("font_color", Color(0, 0, 0, 0))
+	content.add_child(badge)
 
 	# 图标
 	var icon := Label.new()
 	icon.text = data.icon
 	icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	icon.add_theme_font_size_override("font_size", 48)
+	icon.add_theme_font_size_override("font_size", 44)
 	content.add_child(icon)
 
 	# 标题
 	var title := Label.new()
 	title.text = data.title
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 24)
+	title.add_theme_font_size_override("font_size", 28)
 	title.add_theme_color_override("font_color", data.color)
 	content.add_child(title)
 
@@ -161,7 +221,7 @@ func _create_preset_card(data: Dictionary) -> Control:
 	var subtitle := Label.new()
 	subtitle.text = data.subtitle
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	subtitle.add_theme_font_size_override("font_size", 13)
+	subtitle.add_theme_font_size_override("font_size", 16)
 	subtitle.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	content.add_child(subtitle)
 
@@ -170,17 +230,39 @@ func _create_preset_card(data: Dictionary) -> Control:
 	separator.add_theme_constant_override("separation", 1)
 	content.add_child(separator)
 
-	# 特性列表
-	var features_label := Label.new()
-	var features_text := ""
-	for feature in data.features:
-		features_text += "• " + feature + "\n"
-	features_label.text = features_text.strip_edges()
-	features_label.add_theme_font_size_override("font_size", 13)
-	features_label.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85))
-	features_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	content.add_child(features_label)
+	# 规则要点：逐行渲染，被自定义的行标金色 ✎
+	var features := VBoxContainer.new()
+	features.add_theme_constant_override("separation", 6)
+	content.add_child(features)
+	for row: Dictionary in _describe_config(config):
+		var is_changed: bool = changed_fields.has(row["field"])
+		var line := Label.new()
+		line.text = "%s %s%s" % [
+			"✎" if is_changed else "•",
+			row["text"],
+			" (原 %s)" % _original_text(data.source, row["field"]) if is_changed else "",
+		]
+		line.add_theme_font_size_override("font_size", 18)
+		line.add_theme_color_override("font_color",
+			ACCENT_CUSTOM if is_changed else Color(0.85, 0.85, 0.85))
+		line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		features.add_child(line)
 
+	_finish_card(data, card, content)
+	return card
+
+
+## 取某字段在原版预设下的展示文案，用于「(原 X)」对照
+static func _original_text(preset: RuleConfig.ConfigSource, field: String) -> String:
+	var pristine := RuleConfig.from_preset(preset)
+	for row: Dictionary in _describe_config(pristine):
+		if row["field"] == field:
+			return row["text"]
+	return ""
+
+
+## 卡片下半部分：弹性空间 + 两个操作按钮
+func _finish_card(data: Dictionary, card: PanelContainer, content: VBoxContainer) -> void:
 	# 弹性空间
 	var spacer := Control.new()
 	spacer.size_flags_vertical = SIZE_EXPAND_FILL
@@ -194,8 +276,8 @@ func _create_preset_card(data: Dictionary) -> Control:
 	# 选择按钮
 	var btn := Button.new()
 	btn.text = "选择此模式"
-	btn.custom_minimum_size = Vector2(0, 46)
-	btn.add_theme_font_size_override("font_size", 16)
+	btn.custom_minimum_size = Vector2(0, 56)
+	btn.add_theme_font_size_override("font_size", 20)
 
 	var btn_style := StyleBoxFlat.new()
 	btn_style.bg_color = data.color
@@ -220,8 +302,8 @@ func _create_preset_card(data: Dictionary) -> Control:
 	# 规则调整按钮
 	var adjust_btn := Button.new()
 	adjust_btn.text = "自定义规则"
-	adjust_btn.custom_minimum_size = Vector2(0, 38)
-	adjust_btn.add_theme_font_size_override("font_size", 14)
+	adjust_btn.custom_minimum_size = Vector2(0, 52)
+	adjust_btn.add_theme_font_size_override("font_size", 18)
 
 	var adjust_style := StyleBoxFlat.new()
 	adjust_style.bg_color = Color(0.2, 0.22, 0.26)
@@ -247,8 +329,6 @@ func _create_preset_card(data: Dictionary) -> Control:
 	adjust_btn.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85))
 	adjust_btn.pressed.connect(_on_adjust_button_pressed.bind(data.source))
 	btn_container.add_child(adjust_btn)
-
-	return card
 
 
 func _on_preset_button_pressed(source: RuleConfig.ConfigSource) -> void:

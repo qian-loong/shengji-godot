@@ -324,7 +324,7 @@ static func _check_follow_structure(
 	trump_suit: int, current_rank: int, rule_config: RuleConfig,
 ) -> bool:
 	var jat := rule_config.joker_always_trump
-	var required_pairs := _required_pair_count(lead_pattern)
+	var required_pairs := required_pair_count(lead_pattern)
 	if required_pairs <= 0:
 		return true
 
@@ -339,7 +339,11 @@ static func _check_follow_structure(
 
 ## 首出结构里"必须被对上"的对子数。
 ## 甩牌取其各分量的对子数之和——拖拉机按 pair_count，对子按 1，单张不计。
-static func _required_pair_count(lead_pattern: CardPattern.PatternResult) -> int:
+##
+## 公开给 AI 使用：跟牌决策必须和这里的判定同源，否则 AI 会挑出引擎判非法的牌。
+## 曾经 AI 只认 PAIR / TRACTOR，跟甩牌时走"取最小的 N 张"分支，把对子留在手里
+## 被引擎拒绝，而 GUI 又不检查返回值，整局就此卡死。
+static func required_pair_count(lead_pattern: CardPattern.PatternResult) -> int:
 	match lead_pattern.type:
 		Card.CardType.PAIR:
 			return 1
@@ -348,7 +352,7 @@ static func _required_pair_count(lead_pattern: CardPattern.PatternResult) -> int
 		Card.CardType.DUMP:
 			var total := 0
 			for comp: CardPattern.PatternResult in lead_pattern.components:
-				total += _required_pair_count(comp)
+				total += required_pair_count(comp)
 			return total
 		_:
 			return 0

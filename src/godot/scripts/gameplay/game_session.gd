@@ -2,6 +2,8 @@
 ## Run: godot --headless --script scripts/gameplay/game_session.gd
 extends SceneTree
 
+const LogPaths = preload("res://scripts/core/log_paths.gd")
+
 
 var rule_config: RuleConfig
 var game_round: GameRound
@@ -223,11 +225,6 @@ func _print_config_summary() -> void:
 		print("case_id: %s" % case_id)
 
 
-func _repo_root() -> String:
-	var project_root := ProjectSettings.globalize_path("res://").trim_suffix("/")
-	return project_root.get_base_dir().get_base_dir()
-
-
 func _resolve_output_log_path() -> String:
 	if not log_path_override.is_empty():
 		var parent := log_path_override.get_base_dir()
@@ -235,7 +232,7 @@ func _resolve_output_log_path() -> String:
 			DirAccess.make_dir_recursive_absolute(parent)
 		return log_path_override
 
-	var log_dir := "%s/logs" % _repo_root()
+	var log_dir := LogPaths.log_dir()
 	DirAccess.make_dir_recursive_absolute(log_dir)
 	var stamp := Time.get_datetime_string_from_system().replace(":", "-")
 	if not case_id.is_empty():
@@ -573,6 +570,26 @@ func _counter_window_phase() -> void:
 # Play phase
 # ============================================================
 
+## 出牌被引擎拒绝后置位。headless 是批量验证的基础设施，继续跑下去的数据不可信，
+## 而且 _play_phase 的循环条件是"手牌还没出完"——出牌没生效就会一直空转。
+var _play_aborted: bool = false
+
+
+## 让 AI 决策并提交。引擎拒绝时立刻中止，绝不静默继续。
+func _submit_ai_play(seat: int, hand: Array, lead_info: Dictionary) -> Dictionary:
+	var cards := AIPlayer.decide_play(
+		seat, hand, lead_info, session_controller.make_game_state(), rule_config)
+	var res := session_controller.submit_play(seat, cards)
+	if not res.get("ok", false):
+		_play_aborted = true
+		var msg := "AI(seat %d) 出牌被引擎拒绝: %s — 牌: %s" % [
+			seat, str(res.get("error", "unknown")), _cards_to_str(cards)]
+		push_error(msg)
+		print("\n[ERROR] %s" % msg)
+		print("[ERROR] 已中止本局：出牌未生效，继续跑只会空转且产出错误数据")
+	return res
+
+
 func _play_phase() -> void:
 	print("--- 出牌阶段 ---")
 	while game_round.get_hand_size(0) > 0:
@@ -589,30 +606,17 @@ func _play_phase() -> void:
 			var lead_info: Dictionary = turn["lead_info"]
 
 			if seat == human_seat:
-				# Human play
-				if lead_info.is_empty():
-					# Leading
-					print("\n你的手牌:")
-					_display_hand(hand, game_round.trump_suit, current_rank)
-					# Auto-play: use AI
-					var cards := AIPlayer.decide_play(seat, hand, lead_info,
-						session_controller.make_game_state(), rule_config)
-					print("→ 自动出牌: %s" % _cards_to_str(cards))
-					session_controller.submit_play(seat, cards)
-				else:
-					print("\n你的手牌:")
-					_display_hand(hand, game_round.trump_suit, current_rank)
-					var cards := AIPlayer.decide_play(seat, hand, lead_info,
-						session_controller.make_game_state(), rule_config)
-					print("→ 自动出牌: %s" % _cards_to_str(cards))
-					session_controller.submit_play(seat, cards)
-			else:
-				# AI play
-				var cards := AIPlayer.decide_play(seat, hand, lead_info,
-					session_controller.make_game_state(), rule_config)
-				session_controller.submit_play(seat, cards)
+				print("\n你的手牌:")
+				_display_hand(hand, game_round.trump_suit, current_rank)
 
-				print("  %s 出: %s" % [SEAT_NAMES[seat], _cards_to_str(cards)])
+			var res := _submit_ai_play(seat, hand, lead_info)
+			if _play_aborted:
+				return
+			var played := _cards_to_str(res.get("played_cards", []))
+			if seat == human_seat:
+				print("→ 自动出牌: %s" % played)
+			else:
+				print("  %s 出: %s" % [SEAT_NAMES[seat], played])
 
 		# Execute trick
 		var result := session_controller.last_trick_result

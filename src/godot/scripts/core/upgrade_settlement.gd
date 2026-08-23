@@ -95,13 +95,24 @@ static func calculate(
 	# Calculate new rank (only if someone upgrades)
 	if effective_levels > 0:
 		var base_rank: int
+		# 起点这一级本局是否被升级方打过。决定要不要拦在起点上（见 apply_upgrade）。
+		# 庄家方的起点就是本局级牌（current_rank 恒等于庄家队级，见
+		# SessionState.sync_rank_to_dealer），坐庄即在打自己的级 → 已打过。
+		# 攻方打的是对手的级，自己那一级本局没人碰 → 未打过。
+		# attack_rank < 0 是 shared rank mode 兜底，此时攻方起点退化成 current_rank，
+		# 上述二分不成立，按已打过处理以保持原行为。
+		var start_rank_played: bool
 		if side == 0:
 			base_rank = current_rank  # Dealer's team rank
+			start_rank_played = true
 		elif attack_rank >= 0:
 			base_rank = attack_rank  # Attack team's own rank
+			start_rank_played = false
 		else:
 			base_rank = current_rank  # Fallback: shared rank mode
-		result.new_rank = apply_upgrade(base_rank, effective_levels, rule_config)
+			start_rank_played = true
+		result.new_rank = apply_upgrade(
+			base_rank, effective_levels, rule_config, start_rank_played)
 	else:
 		result.new_rank = current_rank
 
@@ -120,7 +131,26 @@ static func calculate(
 
 
 ## Apply upgrade with no-skip-rank constraint
-static func apply_upgrade(current_rank: int, levels: int, rule_config: RuleConfig) -> int:
+##
+## start_rank_played 表示起点这一级是否已被升级方打过：
+##   true  — 庄家方守庄成功，起点正是本局刚打完并守住的级，可以直接升走
+##   false — 攻方翻盘，起点是自己那一级但本局压根没打，若它是必打级须先停下打掉
+##
+## 一队之所以还停在某一级，正是因为还没成功打过它（打过并守住就升走了），
+## 所以「是不是庄家方」就等价于「起点打没打过」，不需要额外记录历史。
+static func apply_upgrade(
+	current_rank: int,
+	levels: int,
+	rule_config: RuleConfig,
+	start_rank_played: bool = true,
+) -> int:
+	# 起点是一张尚未打过的必打级：停在这里，不能越过去。
+	# 注意不能对庄家方也这么判——庄家方的起点恒等于本局级牌，
+	# 无条件拦截会让它守住多少次都升不出 5/10/K，直接死锁。
+	if not start_rank_played and levels > 0 and rule_config.no_skip_enabled:
+		if current_rank in rule_config.no_skip_ranks:
+			return current_rank
+
 	var rank: int = current_rank
 	for i: int in range(levels):
 		var next := _next_rank(rank)

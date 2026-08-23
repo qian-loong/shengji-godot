@@ -16,9 +16,40 @@ after each significant milestone:
 - Architecture decision made
 - Implementation milestone reached
 - Test results obtained
+- **Important design decisions made during debugging/implementation**
 
 The state file should contain: current task, progress checklist, key decisions
 made, files being worked on, and open questions.
+
+**Template:** Use `.claude/docs/templates/session-state-active.md` as a starting point.
+
+**Key Decisions Section (Lightweight Reflection):**
+
+The template includes an optional "Key Decisions" table. Use it to record important
+design choices made during the session, especially those discovered during debugging
+or implementation (not just initial design):
+
+```markdown
+## Key Decisions (Optional)
+
+| What | Options Considered | Decision | Rationale |
+|------|-------------------|----------|-----------|
+| 必打级约束语义 | A) 两层独立  B) 统一中间段  C) 仅UpgradeSettlement | B | 攻守双方都应受约束，统一语义更易理解 |
+```
+
+**When to record a decision:**
+- When you presented options to the user and they chose one
+- When a "bug fix" turned out to be a design decision
+- When you unified divergent logic after user approval
+- When the reasoning behind a choice isn't obvious from the code alone
+
+**Why this matters:**
+- Future sessions can understand *why* something was done this way
+- Prevents re-litigating the same decision
+- Shows what alternatives were considered and rejected
+
+This is **lightweight reflection**, not heavyweight documentation. Only record decisions
+that have design impact — skip trivial implementation details.
 
 ### Status Line Block (Production+ only)
 

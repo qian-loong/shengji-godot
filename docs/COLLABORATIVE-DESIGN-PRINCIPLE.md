@@ -623,6 +623,124 @@ If you answered "No" to any, the agent wasn't collaborative enough!
 
 ---
 
+## 🔍 Self-Reflection Checkpoints
+
+Agents must pause for explicit approval at critical decision points. The collaborative
+workflow is not just about initial design — it applies equally to debugging, refactoring,
+and fixing test failures.
+
+### When to Pause and Reflect
+
+**1. Before fixing test failures:**
+
+```
+❌ WRONG (Autonomous Fix):
+[Test fails] → [Diagnose root cause] → [Implement fix] → [Tests pass] → "Done!"
+
+✅ RIGHT (Collaborative Fix):
+[Test fails] → [Diagnose root cause] → [Present fix options] → [Wait for approval] → [Implement]
+
+Example:
+Agent: "The test `test_multi_level_attack_upgrade_stops_at_first_unplayed_no_skip` is failing.
+
+       Root cause: The constraint check has inconsistent semantics across two layers:
+       - UpgradeSettlement checks if upgrade TARGET is a no-skip rank
+       - SessionState checks if upgrade START is a no-skip rank
+
+       Fix options:
+       A) Unify both layers to check intermediate ranks (not including endpoints)
+       B) Keep divergent semantics but document the difference
+       C) Remove SessionState check and rely only on UpgradeSettlement
+
+       I recommend A because both dealer and attacker should be constrained
+       equally, and unified semantics are easier to reason about.
+
+       Which approach should I take?"
+
+User: "A sounds right. Show me the proposed changes."
+
+Agent: [Shows code diff]
+       "May I write these changes to upgrade_settlement.gd and session_state.gd?"
+
+User: "Yes"
+
+Agent: [Implements and verifies]
+```
+
+**2. Before design-level changes:**
+
+Semantic changes, logic unification, or architectural refactors are **design decisions**,
+not bug fixes, even if discovered during debugging.
+
+```
+❌ WRONG:
+"I noticed the two layers have inconsistent logic, so I unified them to [approach]."
+
+✅ RIGHT:
+"I noticed the two layers check no-skip ranks differently. This seems like a design
+ decision rather than a bug. Should we:
+ A) Unify the semantics (I recommend this)
+ B) Keep them different and document why
+ C) Investigate if the divergence was intentional?"
+```
+
+**3. Before multi-file changes:**
+
+Even if fixing a single logical issue, if the solution touches 3+ files, show the
+full changeset scope before proceeding.
+
+```
+Agent: "This fix requires changes to 3 files:
+       1. upgrade_settlement.gd (constraint check logic)
+       2. session_state.gd (dealer-side constraint check)
+       3. test_session_state.gd (test setup to enable constraint)
+
+       May I proceed with all three?"
+```
+
+### Reflection Triggers Reference
+
+| Trigger | Question to Ask Yourself | Required Action |
+|---------|--------------------------|-----------------|
+| **Test failure** | "Is this a bug or a design decision?" | Present fix options, don't assume |
+| **"I notice..."** | "Am I making a judgment call beyond my scope?" | Ask user for confirmation |
+| **Modifying >2 files** | "Does user understand the full scope?" | Show changeset summary first |
+| **Changing semantics** | "Is this implementation detail or design?" | Treat as design → get approval |
+| **Unifying divergent logic** | "Was the divergence intentional?" | Present unification as an option, not fait accompli |
+| **"Obviously wrong"** | "Obvious to whom? What if it was deliberate?" | Question your assumptions, ask user |
+
+### What Counts as "Design-Level"?
+
+**Design-level changes** (require approval) include:
+- Changing algorithm semantics or behavior
+- Unifying previously divergent implementations
+- Choosing between multiple valid approaches
+- Modifying game rules or constraints
+- Refactoring that changes call patterns or responsibilities
+
+**Implementation details** (can proceed directly) include:
+- Fixing typos
+- Renaming for clarity (when semantics unchanged)
+- Formatting/linting
+- Adding debug logging
+- Simple null checks or bounds validation
+
+When in doubt, treat it as design-level and ask.
+
+### Why This Matters
+
+Without reflection checkpoints, agents can:
+1. Fix symptoms instead of root causes (because they didn't pause to analyze)
+2. Make design decisions disguised as "obvious fixes"
+3. Overstep their authority by changing semantics without user input
+4. Create technical debt by solving the immediate problem without considering alternatives
+
+The collaborative workflow's value is **not just in initial design**, but in ensuring
+every decision point — including those discovered during implementation — involves
+the user's judgment.
+
+---
+
 ## 📚 Example Prompts That Enforce Collaboration
 
 ### For Users:
