@@ -899,3 +899,116 @@ func _prepare_known_follow_round() -> void:
 	controller.game_round.current_rank = R.TWO
 	controller.state.current_rank = R.TWO
 	controller.rule_config.current_rank = R.TWO
+
+
+# ============================================================
+# 甩牌失败降级集成 (F1 card-types.md §2.3)
+#
+# challenge_dump 的纯函数正确性由 test_dump_challenge.gd 覆盖；这里验证
+# submit_play 引擎裁决路径的**结果正确性**：非法甩牌是否真的只落地最小
+# 单张、其余牌是否收回手中、返回契约与日志是否如实记录。S5-03 只做到
+# 「出牌结果正确」这一层，失败动画等 UI 表现不在本测试范围。
+# ============================================================
+
+
+## 搭一个「seat 0 首出甩牌」的出牌局：主 ♠、级 2 ⇒ ♥ 为普通副牌域。
+## dump_cards 是 seat 0 想甩的牌，rival_hand 放到 seat 1 手里制造挑战。
+## 直接注入 hands + 手动进入 playing，绕过发牌随机性（同 _prepare_known_follow_round）。
+func _prepare_dump_lead_round(dump_cards: Array, rival_hand: Array) -> void:
+	controller.rule_config.allow_dump = true
+	controller.start_round(70707)
+	controller.resolve_no_bid_default()
+	controller.current_phase = "playing"
+	controller.game_round.current_lead_seat = 0
+	controller.game_round.trump_suit = Card.Suit.SPADE
+	controller.game_round.current_rank = R.TWO
+	controller.state.current_rank = R.TWO
+	controller.rule_config.current_rank = R.TWO
+	# seat 0 = 甩牌方；seat 1 = 持有更大牌的对手；2/3 该域无牌。
+	controller.game_round.hands = [
+		dump_cards.duplicate(),
+		rival_hand.duplicate(),
+		[Card.normal(Card.Suit.CLUB, R.THREE)],
+		[Card.normal(Card.Suit.CLUB, R.FOUR)],
+	]
+
+
+func test_submit_play_illegal_dump_falls_back_to_smallest_single() -> void:
+	# Arrange: 甩 ♥Q♥Q♥J，对手 seat 1 握 ♥K♥K ⇒ 对 Q 可被压 ⇒ 甩牌失败。
+	# 降级后首出变成单张 ♥J，其余三家各跟一张打完整墩，才会真正结算手牌。
+	# （手牌移除发生在 play_trick，即四家出完时；单次 submit_play 只登记出牌。）
+	var dump := [
+		Card.normal(Card.Suit.HEART, R.QUEEN), Card.normal(Card.Suit.HEART, R.QUEEN),
+		Card.normal(Card.Suit.HEART, R.JACK),
+	]
+	_prepare_dump_lead_round(dump, [
+		Card.normal(Card.Suit.HEART, R.KING), Card.normal(Card.Suit.HEART, R.KING),
+	])
+	controller.begin_trick()
+
+	# Act: seat 0 甩牌（降级为 ♥J），1/2/3 各跟一张单牌打完这一墩。
+	var lead := controller.submit_play(0, dump)
+	controller.submit_play(1, [Card.normal(Card.Suit.HEART, R.KING)])
+	controller.submit_play(2, [Card.normal(Card.Suit.CLUB, R.THREE)])
+	var last := controller.submit_play(3, [Card.normal(Card.Suit.CLUB, R.FOUR)])
+
+	# Assert：首出契约确认降级；整墩结束后手牌只少了真正落地的 ♥J。
+	assert_true(lead["ok"])
+	assert_true(lead["dump_failed"], "非法甩牌应被引擎降级")
+	assert_eq((lead["played_cards"] as Array).size(), 1, "只出一张")
+	var played: Card = lead["played_cards"][0]
+	assert_true(played.equals(Card.normal(Card.Suit.HEART, R.JACK)),
+		"降级为最小的 ♥J，实际 %s" % played.to_string_repr())
+	assert_true(last["trick_complete"], "四家出完，整墩结算")
+	# seat 0 手里应只剩两张 ♥Q（甩牌 3 张 - 落地 1 张 ♥J）。
+	assert_eq(controller.game_round.get_hand_size(0), 2, "其余两张 ♥Q 收回、未随甩牌打出")
+	for c: Card in controller.game_round.get_hand(0):
+		assert_true(c.equals(Card.normal(Card.Suit.HEART, R.QUEEN)),
+			"手里剩的应是 ♥Q，实际 %s" % c.to_string_repr())
+
+
+func test_submit_play_illegal_dump_records_dump_failure_log() -> void:
+	# Arrange
+	var dump := [
+		Card.normal(Card.Suit.HEART, R.QUEEN), Card.normal(Card.Suit.HEART, R.QUEEN),
+		Card.normal(Card.Suit.HEART, R.JACK),
+	]
+	_prepare_dump_lead_round(dump, [
+		Card.normal(Card.Suit.HEART, R.KING), Card.normal(Card.Suit.HEART, R.KING),
+	])
+	controller.begin_trick()
+
+	# Act
+	controller.submit_play(0, dump)
+
+	# Assert：dump_failures 如实记录「想甩什么 / 实际出了什么」。
+	var round_log := logger._current_round
+	assert_true(round_log.has("dump_failures"), "应记录甩牌失败")
+	var failures: Array = round_log["dump_failures"]
+	assert_eq(failures.size(), 1)
+	var entry: Dictionary = failures[0]
+	assert_eq(entry["seat"], 0)
+	assert_eq((entry["attempted"] as Array).size(), 3, "记录完整的 3 张甩牌")
+	assert_eq(entry["played"], Card.normal(Card.Suit.HEART, R.JACK).to_string_repr())
+	assert_true(str(entry["reason"]).length() > 0, "记录失败原因")
+
+
+func test_submit_play_legal_dump_lands_all_cards() -> void:
+	# Arrange: 甩顶端牌 ♥A♥A♥K，对手 seat 1 仅剩单 ♥K（相等不算更大）⇒ 甩牌合法。
+	var dump := [
+		Card.normal(Card.Suit.HEART, R.ACE), Card.normal(Card.Suit.HEART, R.ACE),
+		Card.normal(Card.Suit.HEART, R.KING),
+	]
+	_prepare_dump_lead_round(dump, [Card.normal(Card.Suit.HEART, R.KING)])
+	controller.begin_trick()
+
+	# Act
+	var result := controller.submit_play(0, dump)
+
+	# Assert：合法甩牌整手落地，不降级。验证首出契约即可——played_cards 反映
+	# 实际落地的牌，手牌的物理移除要等整墩 play_trick，不在本用例关注范围。
+	assert_true(result["ok"])
+	assert_false(result["dump_failed"], "顶端牌甩牌应合法，不降级")
+	assert_eq((result["played_cards"] as Array).size(), 3, "三张全部落地")
+	assert_false(logger._current_round.has("dump_failures"),
+		"合法甩牌不应产生失败记录")
