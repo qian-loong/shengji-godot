@@ -17,7 +17,7 @@ goal: "闭合 Sprint 004 的验收缺口，让甩牌规则从「引擎已实现�
 start: "2026-08-23"
 end: "2026-09-06"
 generated: "2026-08-23"
-updated: "2026-09-04"
+updated: "2026-09-05"
 
 stories:
   - id: "S5-01"
@@ -42,16 +42,28 @@ stories:
     completed: "2026-09-04"
     notes: "AVD Pixel_6_API_36 验证：主菜单/预设页/room_config/两级返回导航全通过。报告见 production/qa/evidence/sprint-005/s5-01-verification.md（截图不入 git）。"
 
-  - id: "S5-03"
-    name: "甩牌失败的 UI 表现"
+  - id: "S5-03a"
+    name: "甩牌失败降级：出牌结果正确（逻辑层）"
     file: ""
     priority: must-have
-    status: ready-for-dev
+    status: done
+    owner: "loong"
+    estimate_days: 0.5
+    blocker: ""
+    completed: "2026-09-04"
+    unplanned: true
+    notes: "范围决策（2026-09-04，用户拍板）：S5-03 拆分，先只保证「出牌结果正确」不做 UI 动画。challenge_dump 纯函数已由 test_dump_challenge.gd 覆盖；本条补 submit_play 引擎裁决路径的 3 个集成测试（非法甩牌降级为最小单张 / 手牌收回 / dump_failures 日志）。388→391 GUT 全通过。提交 26ad88c。"
+
+  - id: "S5-03b"
+    name: "甩牌失败的 UI 表现（失败动画 + 最小单牌飞出）"
+    file: ""
+    priority: should-have
+    status: backlog
     owner: ""
-    estimate_days: 2.0
+    estimate_days: 1.5
     blocker: ""
     completed: ""
-    notes: "play-animation.md:27 已规定失败动画 + 最小单牌飞出；逻辑层 PlayValidator.challenge_dump 已实现，GUI 未接"
+    notes: "从原 S5-03 拆出并后置（用户 2026-09-04 决定本 Sprint 只做逻辑层）。play-animation.md:27 规定失败动画 + 最小单牌飞出；逻辑层 dump_failed/dump_attempted/dump_reason 返回契约已就绪，GUI 未接。降级为 should-have。"
 
   - id: "S5-04"
     name: "AI 出牌策略设计补章 (ai-basic.md)"
