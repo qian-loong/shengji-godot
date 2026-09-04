@@ -63,6 +63,21 @@ Recommended environment variable:
 $env:GODOT_EXE="path\to\Godot_v4.6.2-stable_win64_console.exe"
 ```
 
+Two export presets exist in `src/godot/export_presets.cfg`, each bound to a
+renderer through a feature tag — nothing rewrites `project.godot` at export time:
+
+| Preset | Feature tag | Renderer | ABI | Purpose |
+|--------|-------------|----------|-----|---------|
+| `Android` | — | Vulkan Mobile (`mobile`) | arm64-v8a | Real device / shipping |
+| `Android-Emulator` | `emulator` | `gl_compatibility` | arm64-v8a + x86_64 | PC emulator UI checks |
+
+The mapping lives in `project.godot`:
+
+```ini
+renderer/rendering_method="mobile"                     # device build
+renderer/rendering_method.emulator="gl_compatibility"  # Android-Emulator preset
+```
+
 Debug APK command (real device, Vulkan/mobile renderer):
 
 ```powershell
@@ -75,7 +90,7 @@ New-Item -ItemType Directory -Force "builds\android" | Out-Null
   "builds\android\shengji-debug.apk"
 ```
 
-Emulator UI test APK (temporarily switches mobile renderer to `gl_compatibility`, then restores `project.godot`):
+Emulator UI test APK (uses the `Android-Emulator` preset):
 
 ```powershell
 .\tools\export_android_emulator.ps1
