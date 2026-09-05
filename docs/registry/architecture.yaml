@@ -30,7 +30,7 @@
 #   Superseded entries:     Grep pattern="status: superseded"
 
 version: 1
-last_updated: ""
+last_updated: "2026-09-05"
 
 # ─── STATE OWNERSHIP ─────────────────────────────────────────────────────────
 # Who is the authoritative owner of each piece of shared game state.
@@ -43,7 +43,27 @@ last_updated: ""
 # interface: how other systems access this state (read-only property, method call,
 #   signal, shared resource, etc.) — this is the contract other ADRs depend on.
 
-state_ownership: []
+state_ownership:
+  - state: card_memory
+    status: active           # active | superseded_by: ADR-NNNN
+    owner_system: game-round
+    adr: docs/architecture/adr-0005-card-memory-state-management.md
+    interface: "CardMemory (GameRound member): remaining_copies(domain,rank,own_known)->int O(1) 副本计数; record_trick(plays); current_trick_winner_seat()->int. AI 只读，GameRound 每墩结算后写"
+    write_access: game-round-only   # 每墩结算后由 C7 推入；AI 只读
+    referenced_by:
+      - docs/architecture/adr-0005-card-memory-state-management.md
+    added: 2026-09-05
+    revised: ""
+  - state: private_known_cards
+    status: active
+    owner_system: ai-player
+    adr: docs/architecture/adr-0005-card-memory-state-management.md
+    interface: "AIPlayer.set_private_known(cards): 配底/反主后注入的 per-AI 不可变快照（庄家/反主赢家底牌）; 注入 duplicate + 不暴露 setter + assert 单次"
+    write_access: inject-once-at-bury   # 配底/反主完成时一次性注入，之后不可变
+    referenced_by:
+      - docs/architecture/adr-0005-card-memory-state-management.md
+    added: 2026-09-05
+    revised: ""
 
 # Example:
 #
@@ -71,7 +91,31 @@ state_ownership: []
 #
 # pattern options: signal | direct_call | event_bus | shared_resource | rpc | none
 
-interfaces: []
+interfaces:
+  - contract: ai_game_state
+    status: active
+    pattern: direct_call     # C7 每次 AI 决策前构造 game_state Dictionary 传入
+    producer: game-state-machine   # C7 make_game_state()
+    consumers:
+      - ai-player            # SMART 跟牌分支①②③ + score_play v_pts 全依赖
+    adr: docs/architecture/adr-0005-card-memory-state-management.md
+    signal_signature: "make_game_state() -> Dictionary 须含: current_trick_plays[{seat_id,cards,pattern,play_order}], attack_team, defend_team, trump_suit, current_rank, dealer_seat, attack_score, 及 CardMemory 读取入口"
+    referenced_by:
+      - docs/architecture/adr-0005-card-memory-state-management.md
+    added: 2026-09-05
+    revised: ""
+  - contract: legal_plays_enumeration
+    status: active
+    pattern: direct_call     # AI 决策时同步调用 C2 枚举器,返回合法出牌候选集
+    producer: play-validation   # C2 PlayValidator.get_legal_plays()
+    consumers:
+      - ai-player            # SMART 评分流水线遍历候选; 生成器与校验器同源
+    adr: docs/architecture/adr-0006-get-legal-plays-enumeration.md
+    signal_signature: "get_legal_plays(hand, lead: PatternResult?, trump_suit, current_rank, rule_config) -> Array[Array[Card]]; lead=null 枚举首出/lead≠null 枚举跟牌; 全序排序(deck_id tie-break); 甩牌只校验 shape 不校验最大性(不碰 other_hands)"
+    referenced_by:
+      - docs/architecture/adr-0006-get-legal-plays-enumeration.md
+    added: 2026-09-05
+    revised: ""
 
 # Example:
 #
@@ -157,7 +201,25 @@ api_decisions: []
 # Register a pattern when an ADR explicitly bans it AND other ADRs might
 # unknowingly use it (i.e., it's a tempting but wrong approach for this project).
 
-forbidden_patterns: []
+forbidden_patterns:
+  - pattern: ai_decision_dictionary_ordered_traversal
+    status: active
+    description: "AI 决策路径不得对 Dictionary 做有序遍历（for k in dict）。需确定性遍历时用保持插入序的 Array 或遍历前显式按规范键排序。"
+    why: "Godot Dictionary 遍历序 rehash 后可变、跨平台/构建不保证一致，破坏 AC16 逐字节可复现。现有 ai_player.gd 已违反（:206/:210/:222/:278/:330）。"
+    adr: docs/architecture/adr-0005-card-memory-state-management.md
+    added: 2026-09-05
+  - pattern: ai_global_randf
+    status: active
+    description: "AI 决策的任何随机性不得用全局 randf()，必须走单一注入的确定性 RandomNumberGenerator。"
+    why: "全局 randf() 使同 seed 对局无法逐字节复现；现有 decide_bid 已违反（ai_player.gd:55），S5-05 Day-0 须迁移。"
+    adr: docs/architecture/adr-0005-card-memory-state-management.md
+    added: 2026-09-05
+  - pattern: static_mutable_ai_state
+    status: active
+    description: "AIPlayer 决策方法与其可变配置（如 lead_strategy）不得为 static；须为实例方法 + 构造注入依赖。"
+    why: "static 可变状态诱导全局耦合、无法 mock/override，违反项目'依赖注入优于单例'标准；有状态 RNG/CardMemory 挂 static 别扭。"
+    adr: docs/architecture/adr-0005-card-memory-state-management.md
+    added: 2026-09-05
 
 # Example:
 #

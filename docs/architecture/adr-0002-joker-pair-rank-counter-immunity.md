@@ -1,5 +1,14 @@
 # ADR-0002: 「王+对级」（JokerPairRank）免疫公主反主
 
+> ⚠️ **实现已被 [ADR-0003](adr-0003-pair-rank-counter-immunity.md) 取代（2026-06-09）。**
+> 本文档正文与 Migration Plan 展示的 `can_be_countered` 是**三分支黑名单**写法
+> （逐档 `if bid_type == … return false`），那是本 ADR 落地时的历史实现，**现已不存在**。
+> ADR-0003 把 `can_be_countered` **整体重写为白名单**
+> （`return bid_type == SINGLE_RANK or bid_type == JOKER_SINGLE_RANK`），
+> 一行同时表达 JPR 免疫（本 ADR）与 PairRank 对称免疫（ADR-0003），是当前唯一权威。
+> 本 ADR 的**决策与理由仍然有效**（JPR 免疫反主的设计意图不变），仅**实现形态**过时——
+> 照本文档正文代码实现会与现网不一致，请以 ADR-0003 的白名单为准。
+
 ## Status
 
 Accepted (2026-05-18)

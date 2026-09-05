@@ -24,33 +24,118 @@
 #
 # STATUS VALUES: active | deprecated | superseded-by: TR-[system]-NNN
 
-version: 1
-last_updated: ""
+version: 2
+last_updated: "2026-09-05"
 
-requirements: []
+# NOTE: Registry seeded 2026-09-05 by the first /architecture-review run.
+# Only requirements with an owning ADR or an explicit GDD anchor are registered.
+# The 14 already-implemented systems without ADRs (F1/F2/F3/C1/C2/C4/C5/C6/C7/P1–P5)
+# are intentionally NOT back-filled here — that is documentation archaeology, not
+# a traceability gap. Add their TR-IDs only if/when an ADR is written for them.
 
-# --- EXAMPLE ENTRIES (remove when first real entries are added) ---
-#
-# - id: TR-combat-001
-#   system: combat
-#   gdd: design/gdd/combat-system.md
-#   requirement: "Player takes damage from enemies based on attack power minus defence"
-#   created: 2026-03-10
-#   revised: ""
-#   status: active
-#
-# - id: TR-combat-002
-#   system: combat
-#   gdd: design/gdd/combat-system.md
-#   requirement: "Combo window timing is 0.4 seconds between hits"
-#   created: 2026-03-10
-#   revised: "2026-04-01"
-#   status: active
-#
-# - id: TR-combat-003
-#   system: combat
-#   gdd: design/gdd/combat-system.md
-#   requirement: "Old damage formula using raw stats"
-#   created: 2026-03-10
-#   revised: ""
-#   status: superseded-by: TR-combat-001
+requirements:
+  # ─── C3 亮主/抢主/反主 (design/gdd/trump-bidding.md) ───
+  - id: TR-c3-001
+    system: c3
+    gdd: design/gdd/trump-bidding.md
+    requirement: "定主声明 5 档强度(NONE/SingleRank/PairRank/JokerSingleRank/JokerPairRank/PairJoker),BidType enum 值即 strength,is_stronger 严格大于、同档不同花色不算更强"
+    created: 2026-09-05
+    revised: ""
+    status: active   # ADR-0001
+
+  - id: TR-c3-002
+    system: c3
+    gdd: design/gdd/trump-bidding.md
+    requirement: "JokerPairRank(王+对级)与 PairRank 共享'对子必须严格同花色'口径,♥5+♦5 跨花色不生成对应声明"
+    created: 2026-09-05
+    revised: ""
+    status: active   # ADR-0001
+
+  - id: TR-c3-003
+    system: c3
+    gdd: design/gdd/trump-bidding.md
+    requirement: "JokerPairRank(s=4)免疫反主,庄家亮 JPR 后反主窗口直接跳过"
+    created: 2026-09-05
+    revised: ""
+    status: active   # ADR-0002
+
+  - id: TR-c3-004
+    system: c3
+    gdd: design/gdd/trump-bidding.md
+    requirement: "反主免疫总则:只有单张档(SingleRank/JokerSingleRank)可被反主,对级及以上(PairRank/JokerPairRank/PairJoker)对称免疫;can_be_countered 白名单实现"
+    created: 2026-09-05
+    revised: ""
+    status: active   # ADR-0003
+
+  - id: TR-c3-005
+    system: c3
+    gdd: design/gdd/trump-bidding.md
+    requirement: "反主时反家级牌部分必须=当前局 rank(state.current_rank),PAIR_JOKER 豁免;门1候选生成过滤+门2提交防御(matches_rank)"
+    created: 2026-09-05
+    revised: ""
+    status: active   # ADR-0004
+
+  - id: TR-c3-006
+    system: c3
+    gdd: design/gdd/trump-bidding.md
+    requirement: "BidDeclaration 显式携带 rank 字段(PAIR_JOKER 为 -1),供门2 rank 匹配校验与日志审计"
+    created: 2026-09-05
+    revised: ""
+    status: active   # ADR-0004
+
+  # ─── FT1 AI 基础决策 (design/gdd/ai-basic.md) — SMART/v2.0 前瞻契约,ADR-0005 Proposed ───
+  - id: TR-ft1-001
+    system: ft1
+    gdd: design/gdd/ai-basic.md
+    requirement: "局内记牌状态:已出牌记录带 seat_id、按域可查询、每墩结算后(C7 play_trick 完成)推入,GameRound 持有的共享公开记录"
+    created: 2026-09-05
+    revised: ""
+    status: active   # ADR-0005 (Proposed)
+
+  - id: TR-ft1-002
+    system: ft1
+    gdd: design/gdd/ai-basic.md
+    requirement: "按 (domain,rank) 常数时间副本计数 remaining_copies(),支持铁最大判定'某 rank 未出且不在自己手里的副本数 >=2';二维定长数组,禁 Dictionary"
+    created: 2026-09-05
+    revised: ""
+    status: active   # ADR-0005 (Proposed)
+
+  - id: TR-ft1-003
+    system: ft1
+    gdd: design/gdd/ai-basic.md
+    requirement: "可复现契约:SMART 一切随机性由单一注入的确定性 RNG 驱动,decide_bid 去全局 randf();sort_custom 全序 tie-break 到 deck_id;决策路径禁 Dictionary 有序遍历"
+    created: 2026-09-05
+    revised: ""
+    status: active   # ADR-0005 (Proposed)
+
+  - id: TR-ft1-004
+    system: ft1
+    gdd: design/gdd/ai-basic.md
+    requirement: "private_known_cards:庄家/反主赢家配底后注入的 per-AI 不可变快照(8 张),计入 remaining_copies 的 own_known;注入 duplicate + 不暴露 setter + assert 单次"
+    created: 2026-09-05
+    revised: ""
+    status: active   # ADR-0005 (Proposed)
+
+  - id: TR-ft1-005
+    system: ft1
+    gdd: design/gdd/ai-basic.md
+    requirement: "AIPlayer 全部 6 个 public static 方法迁移为实例方法,static var lead_strategy 收纳为实例成员,CardMemory/RNG 构造注入"
+    created: 2026-09-05
+    revised: ""
+    status: active   # ADR-0005 (Proposed)
+
+  - id: TR-ft1-006
+    system: ft1
+    gdd: design/gdd/ai-basic.md
+    requirement: "make_game_state() 扩展 current_trick_plays({seat_id,cards,pattern,play_order})、attack_team/defend_team、累积已出牌查询入口,供 SMART 跟牌分支①②③与 score_play v_pts"
+    created: 2026-09-05
+    revised: ""
+    status: active   # ADR-0005 (Proposed)
+
+  - id: TR-ft1-007
+    system: ft1
+    gdd: design/gdd/ai-basic.md
+    requirement: "C2 get_legal_plays() 实现(首出枚举 lead=null + 跟牌枚举 lead!=null,跟牌须用域内优先/结构约束剪枝),SMART 评分流水线前置交付物(AC0 级联门)"
+    created: 2026-09-05
+    revised: "2026-09-05"
+    status: active   # ADR-0006 (Proposed) — get_legal_plays 枚举器架构

@@ -29,7 +29,7 @@
 | 8 | C5 | 分值追踪 | Core | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/score-tracking.md` |
 | 9 | C6 | 升级结算 | Core | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/upgrade-settlement.md` |
 | 10 | C7 | 对局状态机 | Core | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/game-state-machine.md` |
-| 11 | FT1 | AI 基础决策 | Feature | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/ai-basic.md` |
+| 11 | FT1 | AI 基础决策 | Feature | M1 | MVP | ✅ Approved(4轮复评) | ✅ v1.x 已实现 / SMART(v2.0) 待 S5-05 | `design/gdd/ai-basic.md` |
 | 12 | P2 | 手牌渲染 | Presentation | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/hand-rendering.md` |
 | 13 | P1 | 桌面布局 UI | Presentation | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/table-layout.md` |
 | 14 | P4 | 亮主/抢主 UI | Presentation | M1 | MVP | ✅ | ✅ 已实现 | `design/gdd/bid-ui.md` |
@@ -104,5 +104,8 @@
 | [ADR-0001](../../docs/architecture/adr-0001-bid-strength-refinement.md) | 定主声明强度 5 档细分 | Accepted | 2026-05-18 |
 | [ADR-0002](../../docs/architecture/adr-0002-joker-pair-rank-counter-immunity.md) | 「王+对级」免疫公主反主 | Accepted | 2026-05-18 |
 | [ADR-0003](../../docs/architecture/adr-0003-pair-rank-counter-immunity.md) | 「对级」对称免疫反主（推广 ADR-0002） | Accepted | 2026-06-09 |
+| [ADR-0004](../../docs/architecture/adr-0004-counter-bid-uses-current-round-rank.md) | 反主用当前局 rank 的级牌 | Accepted | 2026-07-01 |
+| [ADR-0005](../../docs/architecture/adr-0005-card-memory-state-management.md) | 记牌状态管理（CardMemory） | Accepted | 2026-09-05 |
+| [ADR-0006](../../docs/architecture/adr-0006-get-legal-plays-enumeration.md) | `get_legal_plays()` 合法出牌枚举器 | Accepted | 2026-09-05 |
 
 运行 `/sprint-plan` 起 Sprint 3。
