@@ -67,25 +67,25 @@ stories:
 
   - id: "S5-04"
     name: "AI 出牌策略设计补章 (ai-basic.md)"
-    file: ""
+    file: "design/gdd/ai-basic.md"
     priority: must-have
-    status: ready-for-dev
-    owner: ""
+    status: done
+    owner: "loong"
     estimate_days: 2.0
     blocker: ""
-    completed: ""
-    notes: "本 Sprint 最高风险项。触及 GDD Q2（AI 甩牌需他人手牌信息）。时间盒 2 天，超时降级为「默认不甩」+ 记牌框架。"
+    completed: "2026-09-05"
+    notes: "新增 §4b「AI 自主决策（SMART 模式）」，关闭 Q2。SMART 作默认，攻守身份驱动，覆盖首出+跟牌（用户拍板扩到跟牌，含拆结构保分）；AI 靠记牌推断自主甩铁最大、不调 challenge_dump、引擎兜底。三旧枚举降为测试开关。只出设计，记牌状态重构+实现+测试留 S5-05（AC9-16 已定义）。design-review 需另开会话跑。"
 
   - id: "S5-05"
-    name: "AI 首出策略实现 / lead_strategy 默认值切换"
+    name: "AI SMART 模式实现（记牌状态 + 自主首出/跟牌 + 默认切 SMART）"
     file: ""
     priority: should-have
     status: backlog
     owner: ""
-    estimate_days: 2.0
-    blocker: "依赖 S5-04 设计结论"
+    estimate_days: 3.0
+    blocker: ""
     completed: ""
-    notes: "目标：批跑首出牌型不再 100% 单张"
+    notes: "S5-04 设计已就绪（ai-basic.md §4b，AC9-16）。工作：decide_play 从 static 改为携带记牌状态、实现攻守身份驱动的自主首出+跟牌+庄家方自主甩牌、默认切 SMART。批跑基线须显式传 --lead-strategy simple 复现。范围较原估大（含记牌重构），估时上调 2→3 天。"
 
   - id: "S5-06"
     name: "CI 断言：GUT 测试总数不得下降"
