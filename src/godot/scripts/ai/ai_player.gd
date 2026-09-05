@@ -27,8 +27,19 @@ static var lead_strategy: LeadStrategy = LeadStrategy.SIMPLE
 # Bid decision
 # ============================================================
 
-## Decide whether and what to bid
-static func decide_bid(seat_id: int, hand: Array, current_rank: int, rule_config: RuleConfig) -> TrumpBidding.BidDeclaration:
+## 决策随机数取值：注入了确定性 RNG 时走它，否则回退全局 randf()。
+##
+## ADR-0005 §可复现契约：SMART/AC16 要求同 seed 逐字节可复现，全局 randf()
+## 会使亮主序列随进程漂移。故 rng 一旦注入（从局种子派生、四家共享同一实例、
+## 座位按固定顺序调用），decide_bid 的随机分支就完全确定。
+## rng == null 时保留旧行为——尚未迁移的调用点（早期测试等）不因此报错。
+static func _decision_randf(rng: RandomNumberGenerator) -> float:
+	return rng.randf() if rng != null else randf()
+
+
+## Decide whether and what to bid.
+## rng: 局级确定性 RNG（四家共享），null 时回退全局 randf()（见 _decision_randf）。
+static func decide_bid(seat_id: int, hand: Array, current_rank: int, rule_config: RuleConfig, rng: RandomNumberGenerator = null) -> TrumpBidding.BidDeclaration:
 	var bids := TrumpBidding.get_available_bids(seat_id, hand, current_rank, rule_config)
 	if bids.is_empty():
 		return null
@@ -52,7 +63,7 @@ static func decide_bid(seat_id: int, hand: Array, current_rank: int, rule_config
 	if trump_strength >= 4:
 		return best
 	# With lower strength, 30% chance to bid anyway
-	if trump_strength >= 2 and randf() < 0.3:
+	if trump_strength >= 2 and _decision_randf(rng) < 0.3:
 		return best
 	return null
 

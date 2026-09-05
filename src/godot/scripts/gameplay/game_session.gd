@@ -24,6 +24,14 @@ var _cli_config_path: String = ""
 var _scenario: Dictionary = {}
 var _scenario_consumed: bool = false
 
+## 局级 AI 决策 RNG（ADR-0005 §可复现契约）。从局种子派生、四家共享同一实例，
+## 座位按固定顺序调用 → decide_bid 的随机分支逐字节可复现。与洗牌 RNG 分离
+## （偏移 seed），避免 AI 消费随机数打乱发牌序列。
+var _ai_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
+## AI RNG seed 相对局种子的偏移，把 AI 决策随机流与洗牌随机流分开。
+const _AI_RNG_SEED_OFFSET: int = 0x5F3759DF
+
 const SEAT_NAMES: Array[String] = ["你(南)", "AI-东", "搭档(北)", "AI-西"]
 const TEAM_NAMES: Array[String] = ["南北队", "东西队"]
 
@@ -289,6 +297,9 @@ func _play_one_round() -> EffectiveSettlement:
 	round_num += 1
 	var round_seed := game_seed + round_num - 1 if game_seed >= 0 else randi()
 
+	# 从局种子派生 AI 决策 RNG（与洗牌流分离）。固定 seed → AI 亮主随机分支可复现。
+	_ai_rng.seed = round_seed + _AI_RNG_SEED_OFFSET
+
 	session_controller.state.team_ranks = team_ranks.duplicate()
 	session_controller.state.current_dealer = current_dealer
 	session_controller.state.current_rank = current_rank
@@ -459,7 +470,7 @@ func _bidding_phase() -> void:
 			# AI player
 			if not bid_made:
 				var available_bids: Array = context["available_bids"]
-				var declaration := AIPlayer.decide_bid(seat, hand, bid_rank, rule_config)
+				var declaration := AIPlayer.decide_bid(seat, hand, bid_rank, rule_config, _ai_rng)
 				if declaration != null:
 					var bid_result := session_controller.submit_bid_or_pass(seat, declaration)
 					if bid_result["ok"]:
