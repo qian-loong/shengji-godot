@@ -1,0 +1,12 @@
+{
+  "preset": "classic",
+  "lead_strategy": "simple",
+  "games_run": 1000,
+  "total_rounds": 28976,
+  "mean_tricks_per_round": 25.0,
+  "std_tricks_per_round": 0.0,
+  "dethrone_rate": 0.5592,
+  "dethrone_events": 16202,
+  "round_settlements": 28976,
+  "note": "AC20 基线：mean_tricks_per_round 供 SMART 墩数降幅(<=10%)比对；dethrone_rate 供 AC19 走廊[0.45,0.60]对照。max_rounds 会截断每 game 的 round 数但不影响单个 round 的墩数统计"
+}
