@@ -1012,3 +1012,67 @@ func test_submit_play_legal_dump_lands_all_cards() -> void:
 	assert_eq((result["played_cards"] as Array).size(), 3, "三张全部落地")
 	assert_false(logger._current_round.has("dump_failures"),
 		"合法甩牌不应产生失败记录")
+
+
+# ============================================================
+# make_game_state 扩展 (S5-05 步骤 C / ADR-0005 §6)
+#
+# SMART 跟牌依赖 game_state 携带本墩进行中出牌 + 攻守阵营 + 记牌入口。
+# 这里验证 make_game_state 的新字段结构正确、current_trick_plays 反映
+# 已出的前几家、attack_team/defend_team/card_memory 正确暴露。
+# ============================================================
+
+
+func test_make_game_state_exposes_smart_fields() -> void:
+	# Arrange — 确定手牌 + lead_seat 0（clubs 副牌域，公主局）
+	_prepare_known_follow_round()
+	controller.begin_trick()
+
+	# Act — 拿决策前（无人出牌）的 game_state
+	var gs := controller.make_game_state()
+
+	# Assert — 新字段齐备
+	assert_true(gs.has("current_trick_plays"), "含 current_trick_plays")
+	assert_true(gs.has("attack_team"), "含 attack_team")
+	assert_true(gs.has("defend_team"), "含 defend_team")
+	assert_true(gs.has("card_memory"), "含 card_memory 读取入口")
+	# 决策前本墩无人出牌
+	assert_eq((gs["current_trick_plays"] as Array).size(), 0, "首家决策前本墩无出牌")
+	# card_memory 是 GameRound 持有的那一份
+	assert_eq(gs["card_memory"], controller.game_round.card_memory,
+		"暴露的是 GameRound 共享的 CardMemory 实例")
+
+
+func test_make_game_state_current_trick_plays_tracks_played_seats() -> void:
+	# Arrange
+	_prepare_known_follow_round()
+	controller.begin_trick()
+
+	# Act — 首家(0)出 ♣3，第二家(1)跟 ♣4
+	controller.submit_play(0, [Card.normal(Card.Suit.CLUB, R.THREE)])
+	controller.submit_play(1, [Card.normal(Card.Suit.CLUB, R.FOUR)])
+	var gs := controller.make_game_state()
+	var plays: Array = gs["current_trick_plays"]
+
+	# Assert — 反映已出的两家，座位/顺序/牌正确
+	assert_eq(plays.size(), 2, "已出两家 → current_trick_plays 有 2 条")
+	assert_eq(plays[0]["seat_id"], 0, "第 0 条是首家 seat 0")
+	assert_eq(plays[0]["play_order"], 0, "首家 play_order=0")
+	assert_eq((plays[0]["cards"] as Array)[0].rank, R.THREE, "首家出 ♣3")
+	assert_eq(plays[1]["seat_id"], 1, "第 1 条是 seat 1")
+	assert_eq(plays[1]["play_order"], 1, "第二家 play_order=1")
+	assert_not_null(plays[0]["pattern"], "每条携带识别出的 pattern")
+
+
+func test_make_game_state_teams_reflect_dealer() -> void:
+	# Arrange — dealer 0 → dealer_team {0,2}, attack_team {1,3}
+	_prepare_known_follow_round()
+
+	# Act
+	var gs := controller.make_game_state()
+
+	# Assert — defend_team = 庄家方（守庄），attack_team = 攻方
+	assert_true(0 in (gs["defend_team"] as Array), "庄家 0 在 defend_team")
+	assert_true(2 in (gs["defend_team"] as Array), "搭档 2 在 defend_team")
+	assert_true(1 in (gs["attack_team"] as Array), "seat 1 在 attack_team")
+	assert_true(3 in (gs["attack_team"] as Array), "seat 3 在 attack_team")

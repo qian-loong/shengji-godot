@@ -653,7 +653,40 @@ func make_game_state() -> Dictionary:
 		"current_rank": state.current_rank,
 		"dealer_seat": game_round.dealer_seat,
 		"attack_score": game_round.score_tracker.get_attack_score(),
+		# SMART 跟牌分支①②③ + score_play 的 v_pts 依赖本墩进行中出牌
+		# （谁在赢 / 墩中分值 / 后续座位有无对手）。见 ADR-0005 §6 + ai-basic.md §4b。
+		"current_trick_plays": _make_current_trick_plays(),
+		# 攻守阵营座位集合，让 SMART 按攻守身份分流而不必自行推导（避免与 C7 不一致）。
+		"attack_team": game_round.attack_team.duplicate(),
+		"defend_team": game_round.dealer_team.duplicate(),
+		# 累积公开记牌读取入口（AI 只读；铁最大副本计数用）。
+		"card_memory": game_round.card_memory,
 	}
+
+
+## 构造本墩进行中出牌快照（供 SMART 决策；决策者尚未出牌，只含已出的前几家）。
+## 每条 { seat_id, cards, pattern, play_order }：
+##   seat_id  = 该出牌的座位（trick_seat_order[i]）
+##   cards    = 该家出的牌（trick_play_cards[i]）
+##   pattern  = 现场识别的牌型（首出可复用 lead_info，此处统一 identify 保持一致）
+##   play_order = 本墩内出牌次序（0 = 首出）
+func _make_current_trick_plays() -> Array:
+	var result: Array = []
+	if game_round == null:
+		return result
+	for i: int in range(trick_play_cards.size()):
+		var cards: Array = trick_play_cards[i]
+		var seat: int = trick_seat_order[i] if i < trick_seat_order.size() else -1
+		var pattern := CardPattern.identify(
+			cards, state.current_rank,
+			rule_config.tractor_allow_rank_card, rule_config.four_same_is_tractor)
+		result.append({
+			"seat_id": seat,
+			"cards": cards,
+			"pattern": pattern,
+			"play_order": i,
+		})
+	return result
 
 
 func sync_rank_to_actual_dealer() -> int:
