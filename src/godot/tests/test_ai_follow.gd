@@ -48,7 +48,7 @@ func _ai_follow_is_legal(
 	hand: Array, lead: Array, trump_suit: int, current_rank: int
 ) -> Dictionary:
 	var info := _lead_info(lead, trump_suit, current_rank)
-	var cards: Array = AIPlayer.decide_play(
+	var cards: Array = AIPlayer.new(1).decide_play(
 		1, hand, info, {"trump_suit": trump_suit, "current_rank": current_rank}, rc)
 	var ok := PlayValidator.validate_follow(
 		cards, hand, lead.size(), info["domain"],
@@ -261,7 +261,7 @@ func test_ai_follow_never_illegal_across_sampled_hands() -> void:
 			"count": lead.size(),
 			"pattern": pattern,
 		}
-		var cards: Array = AIPlayer.decide_play(
+		var cards: Array = AIPlayer.new(1).decide_play(
 			1, follow_hand, info,
 			{"trump_suit": S.SPADE, "current_rank": R.FIVE}, rc)
 

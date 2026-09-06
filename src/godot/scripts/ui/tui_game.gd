@@ -274,7 +274,7 @@ func _process_next_bidder() -> void:
 			session_controller.submit_bid_or_pass(seat, null, "no_valid_cards")
 	else:
 		var available_bids: Array = context["available_bids"]
-		var decl := AIPlayer.decide_bid(seat, hand, bid_rank, rule_config)
+		var decl := AIPlayer.new(seat).decide_bid(seat, hand, bid_rank, rule_config)
 		var bid_result := session_controller.submit_bid_or_pass(seat, decl) if decl != null else session_controller.submit_bid_or_pass(seat, null, "no_valid_cards" if available_bids.is_empty() else "ai_pass")
 		if decl != null and bid_result["ok"] and session_controller.current_phase == "burying":
 			_log("%s 亮主: %s" % [SEAT_NAMES[seat], _bid_label(decl)])
@@ -301,7 +301,7 @@ func _finish_bidding_round() -> void:
 			var hand: Array = context["hand"]
 			var bid_rank: int = context["bid_rank"]
 			var available_bids: Array = context["available_bids"]
-			var decl := AIPlayer.decide_bid(seat, hand, bid_rank, rule_config)
+			var decl := AIPlayer.new(seat).decide_bid(seat, hand, bid_rank, rule_config)
 			var bid_result := session_controller.submit_bid_or_pass(seat, decl) if decl != null else session_controller.submit_bid_or_pass(seat, null, "no_valid_cards" if available_bids.is_empty() else "ai_pass")
 			if decl != null and bid_result["ok"] and session_controller.current_phase == "burying":
 				bid_made = true
@@ -385,7 +385,7 @@ func _start_bury() -> void:
 	if bury_seat != human_seat:
 		# AI bury
 		var merged: Array = context["merged_hand"]
-		var indices := AIPlayer.decide_bury(merged, rule_config.bottom_size,
+		var indices := AIPlayer.new(bury_seat).decide_bury(merged, rule_config.bottom_size,
 			game_round.trump_suit, current_rank, rule_config)
 		session_controller.submit_bury(indices)
 		_log("%s（%s）完成配底" % [SEAT_NAMES[bury_seat], label])
@@ -553,7 +553,7 @@ func _process_next_player() -> void:
 func _ai_play(seat: int) -> void:
 	var turn := session_controller.get_current_turn_context()
 	var hand: Array = turn["hand"]
-	var cards := AIPlayer.decide_play(seat, hand, turn["lead_info"], turn["game_state"], rule_config)
+	var cards := AIPlayer.new(seat).decide_play(seat, hand, turn["lead_info"], turn["game_state"], rule_config)
 	var result := session_controller.submit_play(seat, cards)
 
 	# 引擎拒绝时不能继续：桌面会画出这手牌、手牌数却不变，轮次也推不动（见 gui_game 同款修复）

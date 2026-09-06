@@ -12,15 +12,55 @@ enum LeadStrategy {
 	SIMPLE,         ## 只首出单张（既有行为）
 	MAX_STRUCTURE,  ## 优先首出最大结构：拖拉机 > 对子 > 单张
 	DUMP_HAPPY,     ## 尽量甩牌：同域多张一次打出（用于压测甩牌规则）
+	SMART,          ## 攻守身份驱动的自主决策（首出+跟牌，见 ai-basic.md §4b；S5-05）
 }
 
-## 首出策略。默认 SIMPLE 以保持既有对局基线不变。
+
+# ============================================================
+# Instance state (ADR-0005: static→实例迁移)
+# ============================================================
+
+## 该实例代表的座位（0-3）。
+var seat_id: int = -1
+
+## 局级确定性 RNG（四家共享同一实例，构造注入）。null 时 _decision_randf 回退全局 randf()。
+var rng: RandomNumberGenerator = null
+
+## 局内记牌状态（GameRound 持有的那一份，构造注入）。步骤 B 前为 null。
+## 类型标注留待 CardMemory 类落地（步骤 B）后收紧；现用 Object 以免前向引用。
+var card_memory: Object = null
+
+## 该 AI 私有已知的离场牌（配底/反主后注入的不可变快照）。默认空。
+## 不可变性由约定+防御强制（见 set_private_known）：GDScript 无 const 实例成员。
+var private_known_cards: Array = []
+
+## 是否已注入过 private_known_cards（防重复注入，模拟不可变）。
+var _private_known_injected: bool = false
+
+## 首出策略（实例成员，原 static var）。默认 SIMPLE 以保持既有对局基线不变。
 ##
 ## SIMPLE 下 AI 永远只出单张，导致 allow_dump / strict_follow_structure /
 ## tractor_allow_rank_card / four_same_is_tractor 等规则分支在批跑中永不触发
 ## （实测 54387 墩首出 100% 单张）。scenario 模式会切到 MAX_STRUCTURE
-## 来激活这些路径。
-static var lead_strategy: LeadStrategy = LeadStrategy.SIMPLE
+## 来激活这些路径。SMART 为 S5-05 默认对局路径。
+var lead_strategy: LeadStrategy = LeadStrategy.SIMPLE
+
+
+## 构造 AI 实例。
+## p_seat: 座位 id；p_memory: GameRound 共享的 CardMemory（步骤 B 前传 null）；
+## p_rng: 局级确定性 RNG（四家共享，null 时回退全局 randf()）。
+func _init(p_seat: int = -1, p_memory: Object = null, p_rng: RandomNumberGenerator = null) -> void:
+	seat_id = p_seat
+	card_memory = p_memory
+	rng = p_rng
+
+
+## 注入 private_known_cards（配底/反主后一次性调用）。
+## 不可变模拟：duplicate() 切断外部引用 + assert 只注入一次 + 无 setter 暴露。
+func set_private_known(cards: Array) -> void:
+	assert(not _private_known_injected, "private_known_cards 只能注入一次")
+	private_known_cards = cards.duplicate()
+	_private_known_injected = true
 
 
 # ============================================================
@@ -33,13 +73,13 @@ static var lead_strategy: LeadStrategy = LeadStrategy.SIMPLE
 ## 会使亮主序列随进程漂移。故 rng 一旦注入（从局种子派生、四家共享同一实例、
 ## 座位按固定顺序调用），decide_bid 的随机分支就完全确定。
 ## rng == null 时保留旧行为——尚未迁移的调用点（早期测试等）不因此报错。
-static func _decision_randf(rng: RandomNumberGenerator) -> float:
-	return rng.randf() if rng != null else randf()
+func _decision_randf(p_rng: RandomNumberGenerator) -> float:
+	return p_rng.randf() if p_rng != null else randf()
 
 
 ## Decide whether and what to bid.
 ## rng: 局级确定性 RNG（四家共享），null 时回退全局 randf()（见 _decision_randf）。
-static func decide_bid(seat_id: int, hand: Array, current_rank: int, rule_config: RuleConfig, rng: RandomNumberGenerator = null) -> TrumpBidding.BidDeclaration:
+func decide_bid(seat_id: int, hand: Array, current_rank: int, rule_config: RuleConfig, rng: RandomNumberGenerator = null) -> TrumpBidding.BidDeclaration:
 	var bids := TrumpBidding.get_available_bids(seat_id, hand, current_rank, rule_config)
 	if bids.is_empty():
 		return null
@@ -76,7 +116,7 @@ static func decide_bid(seat_id: int, hand: Array, current_rank: int, rule_config
 ## Returns null when AI declines (pass).
 ## Mirrors decide_bid's hand-strength heuristic so the AI doesn't mass-counter
 ## with weak hands and destabilize automated regressions.
-static func decide_counter(
+func decide_counter(
 	seat_id: int,
 	hand: Array,
 	current_rank: int,
@@ -120,7 +160,7 @@ static func decide_counter(
 # ============================================================
 
 ## Select cards to bury. Returns array of indices into hand.
-static func decide_bury(hand: Array, bottom_size: int, trump_suit: int, current_rank: int, rule_config: RuleConfig) -> Array[int]:
+func decide_bury(hand: Array, bottom_size: int, trump_suit: int, current_rank: int, rule_config: RuleConfig) -> Array[int]:
 	var jat := rule_config.joker_always_trump
 
 	# Score each card: lower score = more likely to bury
@@ -172,7 +212,7 @@ static func decide_bury(hand: Array, bottom_size: int, trump_suit: int, current_
 # ============================================================
 
 ## Decide which cards to play (lead or follow)
-static func decide_play(seat_id: int, hand: Array, lead_info: Dictionary, game_state: Dictionary, rule_config: RuleConfig) -> Array:
+func decide_play(seat_id: int, hand: Array, lead_info: Dictionary, game_state: Dictionary, rule_config: RuleConfig) -> Array:
 	var trump_suit: int = game_state.get("trump_suit", -1)
 	var current_rank: int = game_state.get("current_rank", Card.Rank.TWO)
 	var jat: bool = rule_config.joker_always_trump
@@ -194,7 +234,7 @@ static func decide_play(seat_id: int, hand: Array, lead_info: Dictionary, game_s
 ## 首出必须同一花色域，因此先按域分组，再在组内找连续对子。
 ## 是否构成拖拉机交给 CardPattern.identify 判定，从而自动尊重
 ## tractor_allow_rank_card / four_same_is_tractor 等配置。
-static func _decide_lead_max_structure(hand: Array, trump_suit: int, current_rank: int, rc: RuleConfig) -> Array:
+func _decide_lead_max_structure(hand: Array, trump_suit: int, current_rank: int, rc: RuleConfig) -> Array:
 	var jat := rc.joker_always_trump
 
 	# 按花色域分组
@@ -271,7 +311,7 @@ static func _decide_lead_max_structure(hand: Array, trump_suit: int, current_ran
 ##
 ## 只用于压测甩牌规则路径 —— 它**故意不判断**"每个组成部分是否该域最大"，
 ## 因为那正是要检验引擎有没有拦住的东西（GDD card-types.md §2.3）。
-static func _decide_lead_dump(hand: Array, trump_suit: int, current_rank: int, rc: RuleConfig) -> Array:
+func _decide_lead_dump(hand: Array, trump_suit: int, current_rank: int, rc: RuleConfig) -> Array:
 	if not rc.allow_dump:
 		return []
 
@@ -303,7 +343,7 @@ static func _decide_lead_dump(hand: Array, trump_suit: int, current_rank: int, r
 	return []
 
 
-static func _decide_lead(hand: Array, trump_suit: int, current_rank: int, rc: RuleConfig) -> Array:
+func _decide_lead(hand: Array, trump_suit: int, current_rank: int, rc: RuleConfig) -> Array:
 	var jat := rc.joker_always_trump
 
 	if lead_strategy == LeadStrategy.DUMP_HAPPY:
@@ -365,7 +405,7 @@ static func _decide_lead(hand: Array, trump_suit: int, current_rank: int, rc: Ru
 # Follow decision
 # ============================================================
 
-static func _decide_follow(hand: Array, lead_info: Dictionary, trump_suit: int, current_rank: int, rc: RuleConfig) -> Array:
+func _decide_follow(hand: Array, lead_info: Dictionary, trump_suit: int, current_rank: int, rc: RuleConfig) -> Array:
 	var jat := rc.joker_always_trump
 	var lead_domain: Dictionary = lead_info["domain"]
 	var lead_count: int = lead_info["count"]
@@ -409,7 +449,7 @@ static func _decide_follow(hand: Array, lead_info: Dictionary, trump_suit: int, 
 
 ## Pick domain cards respecting structure rules (pair→must play pair, etc.)
 ## Strategy: play smallest legal combination (save big cards).
-static func _pick_domain_follow(domain_cards: Array, lead_count: int, lead_pattern: CardPattern.PatternResult, trump_suit: int, current_rank: int, rc: RuleConfig) -> Array:
+func _pick_domain_follow(domain_cards: Array, lead_count: int, lead_pattern: CardPattern.PatternResult, trump_suit: int, current_rank: int, rc: RuleConfig) -> Array:
 	var jat := rc.joker_always_trump
 
 	# Group domain cards by card identity (suit+rank / joker_type) to find real pairs
@@ -486,7 +526,7 @@ static func _pick_domain_follow(domain_cards: Array, lead_count: int, lead_patte
 # Helpers
 # ============================================================
 
-static func _count_suit(hand: Array, suit: int, trump_suit: int, current_rank: int, jat: bool) -> int:
+func _count_suit(hand: Array, suit: int, trump_suit: int, current_rank: int, jat: bool) -> int:
 	var count := 0
 	for c: Card in hand:
 		if not c.is_joker and c.suit == suit and not TrumpJudge.is_trump(c, trump_suit, current_rank, jat):
@@ -494,7 +534,7 @@ static func _count_suit(hand: Array, suit: int, trump_suit: int, current_rank: i
 	return count
 
 
-static func _domains_eq(a: Dictionary, b: Dictionary) -> bool:
+func _domains_eq(a: Dictionary, b: Dictionary) -> bool:
 	if a["type"] != b["type"]:
 		return false
 	if a["type"] == TrumpJudge.DomainType.SIDE:

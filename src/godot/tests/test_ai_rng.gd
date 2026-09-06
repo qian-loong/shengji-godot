@@ -43,8 +43,8 @@ func test_ai_rng_same_seed_same_bid_decision() -> void:
 	var hand := _borderline_hand()
 
 	# Act — 同 seed 两个独立 RNG 实例，各调一次 decide_bid
-	var decl_a := AIPlayer.decide_bid(0, hand, R.FOUR, rc, _rng_with_seed(12345))
-	var decl_b := AIPlayer.decide_bid(0, hand, R.FOUR, rc, _rng_with_seed(12345))
+	var decl_a := AIPlayer.new(0).decide_bid(0, hand, R.FOUR, rc, _rng_with_seed(12345))
+	var decl_b := AIPlayer.new(0).decide_bid(0, hand, R.FOUR, rc, _rng_with_seed(12345))
 
 	# Assert — 同 seed 同输入 → 决策一致（都亮或都不亮）
 	var a_bid: bool = decl_a != null
@@ -62,8 +62,8 @@ func test_ai_rng_deterministic_across_many_seeds() -> void:
 	# Act + Assert — 对一批 seed，每个都调两次，逐一断言可复现。
 	# 覆盖足够多 seed 以确保随机分支两侧（bid / pass）都被触及。
 	for seed_value: int in range(0, 50):
-		var d1 := AIPlayer.decide_bid(0, hand, R.FOUR, rc, _rng_with_seed(seed_value))
-		var d2 := AIPlayer.decide_bid(0, hand, R.FOUR, rc, _rng_with_seed(seed_value))
+		var d1 := AIPlayer.new(0).decide_bid(0, hand, R.FOUR, rc, _rng_with_seed(seed_value))
+		var d2 := AIPlayer.new(0).decide_bid(0, hand, R.FOUR, rc, _rng_with_seed(seed_value))
 		assert_eq(d1 != null, d2 != null,
 			"seed %d must be reproducible (bid/pass)" % seed_value)
 
@@ -77,7 +77,7 @@ func test_ai_rng_seed_actually_drives_decision() -> void:
 	var saw_bid := false
 	var saw_pass := false
 	for seed_value: int in range(0, 100):
-		var decl := AIPlayer.decide_bid(0, hand, R.FOUR, rc, _rng_with_seed(seed_value))
+		var decl := AIPlayer.new(0).decide_bid(0, hand, R.FOUR, rc, _rng_with_seed(seed_value))
 		if decl != null:
 			saw_bid = true
 		else:
@@ -97,7 +97,7 @@ func test_ai_rng_null_falls_back_to_global_randf() -> void:
 	# Act — 不传 rng（回退全局 randf）。多跑几次确保随机分支两侧都不崩溃。
 	var all_legal := true
 	for _i: int in range(20):
-		var decl := AIPlayer.decide_bid(0, hand, R.FOUR, rc)
+		var decl := AIPlayer.new(0).decide_bid(0, hand, R.FOUR, rc)
 		# 合法结果 = null（pass）或 suit 为 ♠（唯一级牌花色）
 		if decl != null and decl.suit != S.SPADE:
 			all_legal = false

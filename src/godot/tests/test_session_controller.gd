@@ -226,7 +226,7 @@ func test_submit_bury_executes_bury_and_enters_playing() -> void:
 	controller.start_round(44444)
 	controller.resolve_no_bid_default()
 	var context := controller.get_bury_context()
-	var indices := AIPlayer.decide_bury(
+	var indices := AIPlayer.new(0).decide_bury(
 		context["merged_hand"],
 		context["bottom_size"],
 		context["trump_suit"],
@@ -296,7 +296,7 @@ func test_automatic_controller_path_finishes_round_and_updates_state() -> void:
 	controller.start_round(77777)
 	controller.resolve_no_bid_default()
 	var bury_context := controller.get_bury_context()
-	var indices := AIPlayer.decide_bury(
+	var indices := AIPlayer.new(0).decide_bury(
 		bury_context["merged_hand"],
 		bury_context["bottom_size"],
 		bury_context["trump_suit"],
@@ -311,7 +311,7 @@ func test_automatic_controller_path_finishes_round_and_updates_state() -> void:
 		assert_true(started["ok"])
 		for _i: int in range(4):
 			var turn := controller.get_current_turn_context()
-			var cards := AIPlayer.decide_play(
+			var cards := AIPlayer.new(turn["seat"]).decide_play(
 				turn["seat"],
 				turn["hand"],
 				turn["lead_info"],
@@ -365,7 +365,7 @@ func _setup_at_burying(
 
 func _dealer_burys_and_advance() -> Array:
 	var ctx := controller.get_bury_context()
-	var indices := AIPlayer.decide_bury(
+	var indices := AIPlayer.new(0).decide_bury(
 		ctx["merged_hand"],
 		ctx["bottom_size"],
 		ctx["trump_suit"],
@@ -638,7 +638,7 @@ func test_e2e_human_counter_and_re_bury_full_round() -> void:
 	assert_eq((re_bury_ctx["merged_hand"] as Array).size(), rc.hand_size + rc.bottom_size)
 
 	# 反家 seat 1 扣底（这里用 AI 决策代替"人类点 8 张 confirm"）。
-	var indices := AIPlayer.decide_bury(
+	var indices := AIPlayer.new(0).decide_bury(
 		re_bury_ctx["merged_hand"],
 		re_bury_ctx["bottom_size"],
 		re_bury_ctx["trump_suit"],
@@ -662,7 +662,7 @@ func test_e2e_human_counter_and_re_bury_full_round() -> void:
 		assert_true(started["ok"])
 		for _i: int in range(4):
 			var turn := controller.get_current_turn_context()
-			var cards := AIPlayer.decide_play(
+			var cards := AIPlayer.new(turn["seat"]).decide_play(
 				turn["seat"], turn["hand"], turn["lead_info"],
 				turn["game_state"], rc
 			)
@@ -874,7 +874,7 @@ func _prepare_playing_round(seed_value: int) -> void:
 	controller.start_round(seed_value)
 	controller.resolve_no_bid_default()
 	var context := controller.get_bury_context()
-	var indices := AIPlayer.decide_bury(
+	var indices := AIPlayer.new(0).decide_bury(
 		context["merged_hand"],
 		context["bottom_size"],
 		context["trump_suit"],

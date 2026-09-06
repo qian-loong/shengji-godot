@@ -32,6 +32,18 @@ var _ai_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 ## AI RNG seed 相对局种子的偏移，把 AI 决策随机流与洗牌随机流分开。
 const _AI_RNG_SEED_OFFSET: int = 0x5F3759DF
 
+## 当前首出策略（原 AIPlayer.lead_strategy 全局 static，迁移后收为 host 侧成员）。
+## 每次构造 AI 实例时注入。默认 SIMPLE 保持既有批跑基线。
+var _lead_strategy: AIPlayer.LeadStrategy = AIPlayer.LeadStrategy.SIMPLE
+
+
+## 构造一个 AI 实例（步骤 A：static→实例迁移）。
+## 注入座位、局级 RNG 与当前首出策略；CardMemory 留待步骤 B 接入（暂 null）。
+func _make_ai(seat: int) -> AIPlayer:
+	var ai := AIPlayer.new(seat, null, _ai_rng)
+	ai.lead_strategy = _lead_strategy
+	return ai
+
 const SEAT_NAMES: Array[String] = ["你(南)", "AI-东", "搭档(北)", "AI-西"]
 const TEAM_NAMES: Array[String] = ["南北队", "东西队"]
 
@@ -117,11 +129,11 @@ func _apply_cli_arg(arg: String) -> void:
 func _apply_lead_strategy(name: String, verbose: bool = false) -> void:
 	match name:
 		"simple":
-			AIPlayer.lead_strategy = AIPlayer.LeadStrategy.SIMPLE
+			_lead_strategy = AIPlayer.LeadStrategy.SIMPLE
 		"dump", "dump_happy":
-			AIPlayer.lead_strategy = AIPlayer.LeadStrategy.DUMP_HAPPY
+			_lead_strategy = AIPlayer.LeadStrategy.DUMP_HAPPY
 		"max_structure", "maxstructure":
-			AIPlayer.lead_strategy = AIPlayer.LeadStrategy.MAX_STRUCTURE
+			_lead_strategy = AIPlayer.LeadStrategy.MAX_STRUCTURE
 		_:
 			printerr("未知 --lead-strategy=%s，保持默认 simple" % name)
 			return
@@ -470,7 +482,7 @@ func _bidding_phase() -> void:
 			# AI player
 			if not bid_made:
 				var available_bids: Array = context["available_bids"]
-				var declaration := AIPlayer.decide_bid(seat, hand, bid_rank, rule_config, _ai_rng)
+				var declaration := _make_ai(seat).decide_bid(seat, hand, bid_rank, rule_config, _ai_rng)
 				if declaration != null:
 					var bid_result := session_controller.submit_bid_or_pass(seat, declaration)
 					if bid_result["ok"]:
@@ -532,7 +544,7 @@ func _run_one_bury_round(label: String) -> void:
 		_display_hand(merged, trump_suit, c_rank)
 		print("\n需要选 %d 张扣底（%s）" % [rule_config.bottom_size, label])
 
-	var indices := AIPlayer.decide_bury(merged, rule_config.bottom_size,
+	var indices := _make_ai(bury_seat).decide_bury(merged, rule_config.bottom_size,
 		trump_suit, c_rank, rule_config)
 	if bury_seat == human_seat:
 		print("→ 自动扣底: ", _cards_to_str(_get_cards_by_indices(merged, indices)))
@@ -559,7 +571,7 @@ func _counter_window_phase() -> void:
 		var current_bid: TrumpBidding.BidDeclaration = ctx["current_bid"]
 		var c_rank: int = ctx["current_rank"]
 
-		var decl := AIPlayer.decide_counter(seat, hand, c_rank, current_bid, rule_config)
+		var decl := _make_ai(seat).decide_counter(seat, hand, c_rank, current_bid, rule_config)
 		if decl == null:
 			session_controller.submit_counter_or_pass(seat, null, "ai_pass")
 			print("  %s 不反主" % SEAT_NAMES[seat])
@@ -588,7 +600,7 @@ var _play_aborted: bool = false
 
 ## 让 AI 决策并提交。引擎拒绝时立刻中止，绝不静默继续。
 func _submit_ai_play(seat: int, hand: Array, lead_info: Dictionary) -> Dictionary:
-	var cards := AIPlayer.decide_play(
+	var cards := _make_ai(seat).decide_play(
 		seat, hand, lead_info, session_controller.make_game_state(), rule_config)
 	var res := session_controller.submit_play(seat, cards)
 	if not res.get("ok", false):

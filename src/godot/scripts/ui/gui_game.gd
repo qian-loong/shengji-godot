@@ -814,7 +814,7 @@ func _deal_next_visible_card() -> void:
 		if seat == human_seat:
 			pass
 		else:
-			var decl := AIPlayer.decide_bid(seat, visible_deal_hands[seat], current_rank, rule_config)
+			var decl := AIPlayer.new(seat).decide_bid(seat, visible_deal_hands[seat], current_rank, rule_config)
 			if decl != null:
 				pending_first_bid = decl
 				_clear_actions()
@@ -1067,7 +1067,7 @@ func _process_next_bidder() -> void:
 		var hand: Array = context["hand"]
 		var bid_rank: int = context["bid_rank"]
 		var available_bids: Array = context["available_bids"]
-		var decl := AIPlayer.decide_bid(seat, hand, bid_rank, rule_config)
+		var decl := AIPlayer.new(seat).decide_bid(seat, hand, bid_rank, rule_config)
 		var bid_result := session_controller.submit_bid_or_pass(seat, decl) if decl != null else session_controller.submit_bid_or_pass(seat, null, "no_valid_cards" if available_bids.is_empty() else "ai_pass")
 		if decl != null and bid_result["ok"] and session_controller.current_phase == "burying":
 			_log("%s 亮主: %s" % [SEAT_NAMES[seat], TrumpBidding.bid_label(decl)])
@@ -1093,7 +1093,7 @@ func _finish_bidding_round() -> void:
 			var hand: Array = context["hand"]
 			var bid_rank: int = context["bid_rank"]
 			var available_bids: Array = context["available_bids"]
-			var decl := AIPlayer.decide_bid(seat, hand, bid_rank, rule_config)
+			var decl := AIPlayer.new(seat).decide_bid(seat, hand, bid_rank, rule_config)
 			var bid_result := session_controller.submit_bid_or_pass(seat, decl) if decl != null else session_controller.submit_bid_or_pass(seat, null, "no_valid_cards" if available_bids.is_empty() else "ai_pass")
 			if decl != null and bid_result["ok"] and session_controller.current_phase == "burying":
 				bid_made = true
@@ -1218,7 +1218,7 @@ func _start_bury() -> void:
 
 	if bury_seat != human_seat:
 		var merged: Array = context["merged_hand"]
-		var indices := AIPlayer.decide_bury(merged, rule_config.bottom_size,
+		var indices := AIPlayer.new(bury_seat).decide_bury(merged, rule_config.bottom_size,
 			game_round.trump_suit, current_rank, rule_config)
 		session_controller.submit_bury(indices)
 		_log("%s（%s）完成配底" % [SEAT_NAMES[bury_seat], label])
@@ -1326,7 +1326,7 @@ func _auto_counter_pass_loop() -> void:
 			var counter_bids: Array = ctx.get("available_counter_bids", [])
 			var decl: TrumpBidding.BidDeclaration = null
 			if not counter_bids.is_empty():
-				decl = AIPlayer.decide_counter(seat, game_round.get_hand(seat), current_rank, game_round.bid_declaration, rule_config)
+				decl = AIPlayer.new(seat).decide_counter(seat, game_round.get_hand(seat), current_rank, game_round.bid_declaration, rule_config)
 
 			if decl != null:
 				var res := session_controller.submit_counter_or_pass(seat, decl)
@@ -1471,7 +1471,7 @@ func _process_next_player() -> void:
 func _ai_play(seat: int) -> void:
 	var turn := session_controller.get_current_turn_context()
 	var hand: Array = turn["hand"]
-	var cards := AIPlayer.decide_play(seat, hand, turn["lead_info"], turn["game_state"], rule_config)
+	var cards := AIPlayer.new(seat).decide_play(seat, hand, turn["lead_info"], turn["game_state"], rule_config)
 	var result := session_controller.submit_play(seat, cards)
 
 	# 引擎拒绝时**绝不能**继续往下走。此前这里不看 ok，失败了照样把 AI"想出"的牌
