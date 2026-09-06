@@ -28,6 +28,10 @@ var last_trick_pattern: CardPattern.PatternResult = null
 var bid_declaration: TrumpBidding.BidDeclaration = null
 var logger: GameLogger = null
 
+## 局内公开记牌状态（ADR-0005 / FT1 SMART）。SMART 决策据此做铁最大副本计数。
+## 局初 setup 建、局末随 GameRound 释放；每墩结算后由 SessionController 推入。
+var card_memory: CardMemory = null
+
 # Team config: seats 0,2 vs 1,3
 # Dealer's team = dealer side, other team = attack side
 var dealer_team: Array[int] = []
@@ -53,6 +57,7 @@ func setup(rc: RuleConfig, p_dealer_seat: int) -> void:
 	bury_seat = p_dealer_seat
 	counter_seat = -1
 	score_tracker = ScoreTracker.new(rc.total_score)
+	card_memory = CardMemory.new(rc.deck_count)
 
 	# Set teams
 	dealer_team = [dealer_seat, (dealer_seat + 2) % 4]
@@ -254,12 +259,18 @@ func play_trick(play_cards: Array) -> Dictionary:
 		"attack_score": score_tracker.get_attack_score(),
 	}
 
+	# 公开记牌累加（ADR-0005 §更新时机：每墩结算完成时推入 played_count）。
+	# plays 是权威已公开出牌，record_trick 按 identity 逐张累加。
+	if card_memory != null:
+		card_memory.record_trick(plays)
+
 	if logger:
 		logger.log_hands_after_trick(hands, trump_suit, current_rank, jat)
 		var side_str := "attack" if winner_is_attack else "dealer"
 		logger.log_trick_result(winner, trick_score, score_tracker.get_attack_score(),
 			"winner=%d (%s), lead_domain=%s" % [winner, side_str, str(lead_domain)])
 
+	trick_completed.emit(result)
 	return result
 
 
