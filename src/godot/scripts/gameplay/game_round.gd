@@ -162,6 +162,21 @@ func get_dealer_hand_with_bottom() -> Array:
 	return BottomManager.reveal_bottom(hands[bury_seat], bottom)
 
 
+## 某座位的私有已知离场牌（ADR-0005 §4 / ai-basic.md §States）。
+## = "该 AI 确定不在任何对手手里的离场牌集合"。
+##
+## 出牌阶段调用（配底/反主均已尘埃落定，bury_seat + buried_bottom 是终态）：
+##   - 最后配底者（bury_seat）：= 自己扣入的 buried_bottom（8 张）。
+##     无反主时 bury_seat == dealer；反主成功后 bury_seat == counter_seat。
+##   - 其他座位：= 空。原庄家在反主成功后也归此类——它曾扣的 8 张已被反主
+##     赢家收回、状态不再确定（GDD MVP：原庄家 private_known 取空）。
+## 返回 duplicate()，切断外部引用（供 AIPlayer.set_private_known 的不可变约定）。
+func private_known_for(seat: int) -> Array:
+	if seat == bury_seat:
+		return buried_bottom.duplicate()
+	return []
+
+
 func execute_bury(selected_indices: Array[int]) -> Dictionary:
 	var merged := get_dealer_hand_with_bottom()
 	var result := BottomManager.bury_bottom(merged, selected_indices, rule_config.bottom_size)

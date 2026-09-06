@@ -1076,3 +1076,79 @@ func test_make_game_state_teams_reflect_dealer() -> void:
 	assert_true(2 in (gs["defend_team"] as Array), "搭档 2 在 defend_team")
 	assert_true(1 in (gs["attack_team"] as Array), "seat 1 在 attack_team")
 	assert_true(3 in (gs["attack_team"] as Array), "seat 3 在 attack_team")
+
+
+# ============================================================
+# private_known_for — 私有已知底牌 (S5-05 步骤 D / ADR-0005 §4)
+#
+# "该 AI 确定不在任何对手手里的离场牌集合"。出牌阶段查询（配底/反主终态）：
+# 最后配底者得 buried_bottom（8 张），其他座位得空。反主成功后 bury_seat
+# 转到反主赢家，原庄家归空（曾扣的已被收回）。
+# ============================================================
+
+
+func test_private_known_for_dealer_gets_buried_bottom() -> void:
+	# Arrange — 无反主，庄家 0 配底
+	_prepare_playing_round(88888)
+
+	# Act
+	var dealer_known := controller.game_round.private_known_for(0)
+	var buried: Array = controller.game_round.buried_bottom
+
+	# Assert — 庄家拿到自己扣的 8 张，逐张一致
+	assert_eq(dealer_known.size(), rc.bottom_size, "庄家私有已知 = bottom_size 张")
+	assert_eq(dealer_known.size(), buried.size(), "与 buried_bottom 张数一致")
+	for i: int in range(buried.size()):
+		assert_true(dealer_known[i].equals(buried[i]), "第 %d 张与 buried_bottom 一致" % i)
+
+
+func test_private_known_for_non_bury_seat_is_empty() -> void:
+	# Arrange — 无反主，bury_seat = dealer 0
+	_prepare_playing_round(88888)
+
+	# Act + Assert — 非配底座位拿空
+	assert_eq(controller.game_round.private_known_for(1).size(), 0, "非庄座 1 拿空")
+	assert_eq(controller.game_round.private_known_for(2).size(), 0, "搭档座 2 也拿空（不共享底牌）")
+	assert_eq(controller.game_round.private_known_for(3).size(), 0, "座 3 拿空")
+
+
+func test_private_known_for_returns_independent_copy() -> void:
+	# Arrange
+	_prepare_playing_round(88888)
+
+	# Act — 改动返回值不得污染 game_round.buried_bottom（duplicate 切引用）
+	var known := controller.game_round.private_known_for(0)
+	var original_size := controller.game_round.buried_bottom.size()
+	known.clear()
+
+	# Assert
+	assert_eq(controller.game_round.buried_bottom.size(), original_size,
+		"private_known_for 返回独立拷贝，改动不影响 buried_bottom")
+
+
+func test_private_known_for_after_counter_winner_and_ex_dealer() -> void:
+	# Arrange — 反主成功：dealer 0 亮 SINGLE_RANK ♥，attacker 1 反 PAIR_RANK ♠
+	rc.bid_requires_joker = false
+	_setup_at_burying(false, 0, TrumpBidding.BidType.SINGLE_RANK, Card.Suit.HEART)
+	_dealer_burys_and_advance()
+	_force_pair_rank_counter_cards(1, Card.Suit.SPADE, R.TWO)
+	var counter_decl := TrumpBidding.BidDeclaration.new(1, TrumpBidding.BidType.PAIR_RANK, Card.Suit.SPADE, R.TWO)
+	var counter_result := controller.submit_counter_or_pass(1, counter_decl)
+	assert_true(counter_result["counter_made"], "前置：反主成功")
+
+	# 反主赢家 1 重新配底
+	var ctx := controller.get_bury_context()
+	var indices := AIPlayer.new(1).decide_bury(
+		ctx["merged_hand"], ctx["bottom_size"], ctx["trump_suit"], ctx["current_rank"], rc)
+	controller.submit_bury(indices)
+
+	# Act + Assert — bury_seat 现为 1（反主赢家）
+	assert_eq(controller.game_round.bury_seat, 1, "前置：bury_seat 转到反主赢家")
+	var winner_known := controller.game_round.private_known_for(1)
+	assert_eq(winner_known.size(), rc.bottom_size, "反主赢家 1 拿到新扣的 8 张")
+	for i: int in range(winner_known.size()):
+		assert_true(winner_known[i].equals(controller.game_round.buried_bottom[i]),
+			"反主赢家私有已知 = 新 buried_bottom")
+	# 原庄家 0 归空（曾扣的已被反主赢家收回，状态不再确定 — GDD MVP）
+	assert_eq(controller.game_round.private_known_for(0).size(), 0,
+		"原庄家 0 反主后 private_known 取空")

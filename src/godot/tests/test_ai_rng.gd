@@ -104,3 +104,34 @@ func test_ai_rng_null_falls_back_to_global_randf() -> void:
 
 	# Assert — 回退路径永远返回合法结果、不崩溃（无条件断言，避免 risky）
 	assert_true(all_legal, "rng=null fallback must always return a legal bid or pass")
+
+
+# ============================================================
+# set_private_known — 私有已知底牌注入的不可变约定 (步骤 D / ADR-0005 §4)
+#
+# GDScript 无 const 实例成员，靠 duplicate() 切引用 + 无 setter 暴露 +
+# assert 单次注入 模拟不可变。这里验证 duplicate 切引用（改外部数组不污染
+# 已注入的 private_known_cards）。
+# ============================================================
+
+
+func test_ai_set_private_known_duplicates_input() -> void:
+	# Arrange
+	var ai := AIPlayer.new(0)
+	var cards := [Card.normal(S.SPADE, R.FIVE), Card.normal(S.HEART, R.KING)]
+
+	# Act — 注入后改动原数组
+	ai.set_private_known(cards)
+	cards.clear()
+
+	# Assert — 注入的快照不受外部改动影响（duplicate 切了引用）
+	assert_eq(ai.private_known_cards.size(), 2,
+		"set_private_known 存的是 duplicate，外部 clear 不影响")
+
+
+func test_ai_private_known_defaults_empty() -> void:
+	# Arrange + Act — 未注入时默认空
+	var ai := AIPlayer.new(2)
+
+	# Assert
+	assert_eq(ai.private_known_cards.size(), 0, "未注入时 private_known_cards 默认空")

@@ -40,8 +40,11 @@ var _lead_strategy: AIPlayer.LeadStrategy = AIPlayer.LeadStrategy.SIMPLE
 ## 构造一个 AI 实例（步骤 A：static→实例迁移）。
 ## 注入座位、局级 RNG 与当前首出策略；CardMemory 留待步骤 B 接入（暂 null）。
 func _make_ai(seat: int) -> AIPlayer:
-	var ai := AIPlayer.new(seat, null, _ai_rng)
+	var ai := AIPlayer.new(seat, game_round.card_memory, _ai_rng)
 	ai.lead_strategy = _lead_strategy
+	# 注入该座位私有已知底牌（配底/反主终态；非最后配底者得空）。
+	# 出牌阶段值已定；配底阶段的临时实例虽也注入，但不读 private_known，无害。
+	ai.set_private_known(game_round.private_known_for(seat))
 	return ai
 
 const SEAT_NAMES: Array[String] = ["你(南)", "AI-东", "搭档(北)", "AI-西"]
